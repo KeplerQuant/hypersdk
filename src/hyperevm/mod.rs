@@ -2,6 +2,8 @@
 //!
 //! Everything related to HyperEVM and contracts.
 
+pub mod uniswap;
+
 // reimport
 pub use alloy::providers::ProviderBuilder;
 use alloy::{

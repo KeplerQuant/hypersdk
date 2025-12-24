@@ -1,0 +1,233 @@
+use alloy::{primitives::utils, rpc::types::Filter, sol, sol_types::SolEvent};
+use clap::Parser;
+use hypersdk::hyperevm::{self, Address, DynProvider, IERC20, ProviderTrait, U256};
+
+use crate::MorphoVault::MorphoVaultInstance;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// The address of the morpho vault.
+    #[arg(
+        short,
+        long,
+        default_value = "0xfc5126377f0efc0041c0969ef9ba903ce67d151e"
+    )]
+    contract_address: Address,
+
+    #[arg(short, long)]
+    user: Address,
+
+    #[arg(short, long, default_value = "http://127.0.0.1:8545")]
+    rpc_url: String,
+}
+
+sol! {
+    #[sol(rpc)]
+    contract MorphoVault {
+        // fns
+        function balanceOf(address account) external view returns (uint256);
+        function asset() external view returns (address);
+        function convertToAssets(uint256 shares) external view returns (uint256 assets);
+        // events
+        event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares);
+        event Withdraw(
+            address indexed sender,
+            address indexed receiver,
+            address indexed owner,
+            uint256 assets,
+            uint256 shares
+        );
+    }
+}
+
+struct Performance {
+    deposited_shares: U256,
+    deposited_assets: U256,
+    decimals: u8,
+    accrued_value_in_asset: U256,
+}
+
+impl Performance {
+    async fn accrued_value(
+        &mut self,
+        block: u64,
+        vault: MorphoVaultInstance<DynProvider>,
+    ) -> anyhow::Result<Option<String>> {
+        if self.deposited_assets == 0 {
+            return Ok(None);
+        }
+
+        let current_value = vault
+            .convertToAssets(self.deposited_shares)
+            .block(block.into())
+            .call()
+            .await?;
+        // delta
+        self.accrued_value_in_asset = current_value - self.deposited_assets;
+
+        Ok(Some(utils::format_units(
+            self.accrued_value_in_asset,
+            self.decimals,
+        )?))
+    }
+
+    fn deposit(&mut self, assets: U256, shares: U256) {
+        self.deposited_assets += assets;
+        self.deposited_shares += shares;
+    }
+
+    fn withdraw(&mut self, assets: U256, shares: U256) {
+        // we can withdraw more than what we deposit, but not more shares
+        self.deposited_assets = self.deposited_assets.saturating_sub(assets);
+        self.deposited_shares -= shares;
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let _ = simple_logger::init_with_level(log::Level::Debug);
+    let args = Cli::parse();
+
+    println!("Connecting to RPC endpoint: {}", args.rpc_url);
+
+    let provider = DynProvider::new(hyperevm::mainnet_with_url(&args.rpc_url).await?);
+    let current_block = provider.get_block_number().await?;
+
+    let vault = MorphoVault::new(args.contract_address, provider.clone());
+    let pool_asset_address = vault.asset().call().await?;
+
+    let pool_asset = IERC20::new(pool_asset_address, provider.clone());
+    let decimals = pool_asset.decimals().call().await?;
+
+    let mut from_block = 4_000_000;
+
+    // performance
+    let mut performance = Performance {
+        deposited_assets: U256::from(0),
+        accrued_value_in_asset: U256::from(0),
+        deposited_shares: U256::from(0),
+        decimals,
+    };
+
+    while from_block <= current_block {
+        let to_block = from_block + 100_000;
+
+        let half_block = (to_block + from_block) / 2;
+        if let Some(value) = performance.accrued_value(half_block, vault.clone()).await? {
+            println!("Pnl: {value}");
+        }
+
+        let filter = Filter::new()
+            .address(args.contract_address)
+            .event_signature(vec![
+                MorphoVault::Deposit::SIGNATURE_HASH,
+                MorphoVault::Withdraw::SIGNATURE_HASH,
+            ])
+            .from_block(from_block)
+            .to_block(to_block)
+            .topic1(args.user);
+
+        println!("Fetching from {from_block} to {to_block}");
+        let logs = provider.get_logs(&filter).await?;
+
+        for log in logs {
+            let Some(topic0) = log.topic0() else {
+                continue;
+            };
+
+            let block_number = log.block_number.unwrap();
+            let user_balance_before = pool_asset
+                .balanceOf(args.user)
+                .block((block_number - 1).into())
+                .call()
+                .await?;
+            let user_balance = pool_asset
+                .balanceOf(args.user)
+                .block(block_number.into())
+                .call()
+                .await?;
+            let user_balance_before_str = utils::format_units(user_balance_before, decimals)?;
+            let user_balance_str = utils::format_units(user_balance, decimals)?;
+
+            match *topic0 {
+                MorphoVault::Deposit::SIGNATURE_HASH => {
+                    // Decode the log data using the type generated by the sol! macro
+                    let deposit = MorphoVault::Deposit::decode_log_data(&log.inner)
+                        .map_err(|e| anyhow::anyhow!("Failed to decode log data: {}", e))?;
+                    let total_shares = vault
+                        .balanceOf(args.user)
+                        .block(block_number.into())
+                        .call()
+                        .await?;
+                    let balance = vault
+                        .convertToAssets(total_shares)
+                        .block(block_number.into())
+                        .call()
+                        .await?;
+
+                    performance.deposit(deposit.assets, deposit.shares);
+
+                    println!("<< Deposit (Block {block_number}):");
+                    println!(
+                        "User balances: before {}, after {}",
+                        user_balance_before_str, user_balance_str
+                    );
+                    println!(
+                        "  Assets: {}",
+                        utils::format_units(deposit.assets, decimals)?
+                    );
+                    println!("  Owner:  {}", deposit.owner);
+                    println!("  Sender: {}", deposit.sender);
+                    println!("  Shares: {}", deposit.shares);
+                    println!("  Balance: {}", utils::format_units(balance, decimals)?);
+                    println!("---");
+                }
+                MorphoVault::Withdraw::SIGNATURE_HASH => {
+                    // Decode the log data using the type generated by the sol! macro
+                    let withdraw = MorphoVault::Withdraw::decode_log_data(&log.inner)
+                        .map_err(|e| anyhow::anyhow!("Failed to decode log data: {}", e))?;
+                    let total_shares = vault
+                        .balanceOf(args.user)
+                        .block(block_number.into())
+                        .call()
+                        .await?;
+                    let balance = vault
+                        .convertToAssets(total_shares)
+                        .block(block_number.into())
+                        .call()
+                        .await?;
+
+                    let Some(pnl) = performance
+                        .accrued_value(block_number, vault.clone())
+                        .await?
+                    else {
+                        unreachable!()
+                    };
+
+                    performance.withdraw(withdraw.assets, withdraw.shares);
+
+                    println!(">> Withdraw (Block {block_number}), total pnl: {pnl}:");
+                    println!(
+                        "User balances: before {}, after {}",
+                        user_balance_before_str, user_balance_str
+                    );
+                    println!(
+                        "  Assets: {}",
+                        utils::format_units(withdraw.assets, decimals)?
+                    );
+                    println!("  Owner:  {}", withdraw.owner);
+                    println!("  Sender: {}", withdraw.sender);
+                    println!("  Shares: {}", withdraw.shares);
+                    println!("  Balance: {}", utils::format_units(balance, decimals)?);
+                    println!("---");
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        from_block = to_block;
+    }
+
+    Ok(())
+}

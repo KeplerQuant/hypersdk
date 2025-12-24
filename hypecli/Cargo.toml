@@ -1,0 +1,33 @@
+[package]
+name = "hypecli"
+version = "0.1.0"
+edition = "2024"
+authors = ["Dario <dario@infinitefieldtrading.com>"]
+description = "CLI tool for interacting with Hyperliquid via hypersdk"
+repository = "https://github.com/dgrr/hypersdk"
+homepage = "https://github.com/dgrr/hypersdk"
+license = "MPL-2.0"
+readme = "README.md"
+keywords = ["hyperliquid", "cli", "trading", "dex", "perps"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+documentation = "https://github.com/dgrr/hypersdk"
+rust-version = "1.85.0"
+include = [
+  "src/**",
+  "README.md",
+  "LICENSE*",
+  "Cargo.toml"
+]
+
+[dependencies]
+hypersdk = { path = ".." }
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.43.1", features = [
+    "rt",
+    "rt-multi-thread",
+    "time",
+    "macros",
+    "signal",
+] }
+anyhow = "1.0.100"
+tabwriter = "1.4.0"

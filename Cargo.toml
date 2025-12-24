@@ -1,0 +1,64 @@
+## Package metadata
+[package]
+name = "hypersdk"
+version = "0.1.0"
+edition = "2024"
+authors = ["Dario <dario@infinitefieldtrading.com>"]
+license = "MPL-2.0"
+description = "Rust SDK for Hyperliquid"
+repository = "https://github.com/infinitefield/hypersdk"
+homepage = "https://github.com/infinitefield/hypersdk"
+readme = "README.md"
+keywords = ["hyperliquid", "sdk", "trading", "dex", "perps"]
+documentation = "https://github.com/infinitefield/hypersdk"
+rust-version = "1.85.0"
+
+## Packaging: control what gets published to crates.io
+# Use a minimal allowlist to keep the crate small.
+include = [
+  "src/**",
+  "README.md",
+  "LICENSE*",
+  "Cargo.toml",
+]
+# Exclude CI, examples, and tests from the package tarball.
+exclude = [
+  "/.github/*",
+  "/examples/*",
+  "/tests/*",
+  "/.gitignore",
+]
+
+## Documentation (docs.rs) configuration
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+## Runtime dependencies
+[dependencies]
+alloy = { version = "1.1.1", default-features = false, features = ["contract", "eip712", "getrandom", "providers", "reqwest", "rpc", "rpc-types", "signer-local", "signers", "sol-types"] }
+anyhow = "1.0.100"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+const-hex = "1"
+derive_more = { version = "2", features = ["display"] }
+either = { version = "1", features = ["serde"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
+log = "0.4"
+reqwest = "0.12"
+rmp-serde = "1"
+rust_decimal = { version = "1", features = ["macros", "maths", "serde", "serde-with-str"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_with = { version = "3", default-features = false, features = ["std"] }
+tokio = { version = "1", default-features = false, features = ["test-util", "time"] }
+url = "2"
+yawc = { version = "0.2", features = ["json", "logging", "simd"] }
+hex-literal = "0.4"
+
+## Development and test dependencies
+[dev-dependencies]
+alloy = { version = "1", features = ["pubsub"] }
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15.7"
+simple_logger = "5"
+tokio = { version = "1", features = ["full"] }

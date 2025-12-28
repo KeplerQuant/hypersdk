@@ -117,6 +117,13 @@ pub struct PerpMarket {
     pub sz_decimals: i64,
     /// Collateral currency
     pub collateral: SpotToken,
+    /// Max allowed leverage
+    pub max_leverage: u64,
+    /// Margin isolated
+    pub isolated_margin: bool,
+    /// Margin mode
+    pub margin_mode: Option<MarginMode>,
+    // TDOO: implement margin tables
 }
 
 /// Spot tradeable instrument.
@@ -294,8 +301,11 @@ pub async fn perp_markets(
         .map(|(index, perp)| PerpMarket {
             name: perp.name,
             index,
+            max_leverage: perp.max_leverage,
             sz_decimals: perp.sz_decimals,
             collateral: collateral.clone(),
+            isolated_margin: perp.only_isolated,
+            margin_mode: perp.margin_mode,
         })
         .collect();
 
@@ -328,7 +338,18 @@ struct PerpTokens {
 #[serde(rename_all = "camelCase")]
 struct PerpUniverseItem {
     name: String,
+    max_leverage: u64,
+    #[serde(default)]
+    only_isolated: bool,
+    margin_mode: Option<MarginMode>,
     sz_decimals: i64,
+    // margin_table_id: u64,
+}
+
+#[derive(Debug, Copy, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MarginMode {
+    StrictIsolated,
 }
 
 #[derive(Deserialize)]

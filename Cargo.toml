@@ -71,8 +71,8 @@ name = "morpho_create_market_events"
 path = "examples/morpho/create_market_events.rs"
 
 [[example]]
-name = "morpho_events"
-path = "examples/morpho/events.rs"
+name = "morpho_vault_performance"
+path = "examples/morpho/vault_performance.rs"
 
 [[example]]
 name = "morpho_highest_apy"

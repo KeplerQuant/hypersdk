@@ -6,7 +6,10 @@ use alloy::{
 
 use crate::hyperevm::{
     DynProvider, ERC20,
-    morpho::contracts::{AdaptativeCurveIrm, Morpho},
+    morpho::contracts::{
+        AdaptativeCurveIrm,
+        Morpho::{self, MorphoInstance},
+    },
 };
 
 pub mod contracts;
@@ -95,6 +98,11 @@ where
     /// Returns the root provider.
     pub fn provider(&self) -> &P {
         &self.provider
+    }
+
+    /// Returns a MorphoInstance.
+    pub fn instance(&self, address: Address) -> MorphoInstance<P> {
+        contracts::Morpho::new(address, self.provider.clone())
     }
 
     /// Returns the pool's APY.

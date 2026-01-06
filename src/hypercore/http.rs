@@ -921,7 +921,75 @@ impl Client {
         }
     }
 
-    /// Execute a multisig action.
+    /// Executes a multisig action on Hyperliquid.
+    ///
+    /// This method allows multiple signers to authorize a single action (such as placing orders,
+    /// canceling orders, or transferring funds) from a multisig wallet. All provided signers must
+    /// be authorized on the multisig wallet configuration.
+    ///
+    /// # Parameters
+    ///
+    /// - `lead`: The lead signer who submits the transaction to the exchange
+    /// - `multi_sig_user`: The multisig wallet address that will execute the action
+    /// - `signers`: Iterator of all signers whose signatures are required (typically includes the lead)
+    /// - `action`: The action to execute (Order, Cancel, Transfer, etc.)
+    /// - `nonce`: Unique nonce for this transaction (typically current timestamp in milliseconds)
+    ///
+    /// # Multisig Process
+    ///
+    /// 1. The action is hashed with the multisig address and lead signer
+    /// 2. Each signer signs the action hash using their private key
+    /// 3. All signatures are collected into a multisig payload
+    /// 4. The lead signer signs the entire multisig payload
+    /// 5. The signed multisig transaction is submitted to the exchange
+    /// 6. The exchange verifies all signatures match the multisig wallet's authorized signers
+    ///
+    /// # Returns
+    ///
+    /// Returns the API response containing the result of the action execution.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use hypersdk::hypercore::{self, types::*, PrivateKeySigner};
+    /// use rust_decimal_macros::dec;
+    ///
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let client = hypercore::mainnet();
+    ///
+    /// // Parse the signers for the multisig wallet
+    /// let signer1: PrivateKeySigner = "key1".parse()?;
+    /// let signer2: PrivateKeySigner = "key2".parse()?;
+    /// let signers = vec![&signer1, &signer2];
+    ///
+    /// // The multisig wallet address
+    /// let multisig_addr: hypersdk::Address = "0x...".parse()?;
+    ///
+    /// // Create an order action
+    /// let order = BatchOrder {
+    ///     orders: vec![OrderRequest {
+    ///         asset: 0,
+    ///         is_buy: true,
+    ///         limit_px: dec!(50000),
+    ///         sz: dec!(0.1),
+    ///         reduce_only: false,
+    ///         order_type: OrderTypePlacement::Limit {
+    ///             tif: TimeInForce::Gtc,
+    ///         },
+    ///         cloid: Default::default(),
+    ///     }],
+    ///     grouping: OrderGrouping::Na,
+    /// };
+    ///
+    /// let nonce = chrono::Utc::now().timestamp_millis() as u64;
+    ///
+    /// // Execute the multisig order
+    /// let response = client
+    ///     .multi_sig(&signer1, multisig_addr, signers, Action::Order(order), nonce)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn multi_sig<'a, S: SignerSync + Signer + 'a>(
         &self,
         lead: &S,
@@ -1101,6 +1169,27 @@ fn sign_l1_action<S: SignerSync>(
     Ok(sig.into())
 }
 
+/// Signs a multisig action for submission to the exchange.
+///
+/// This function creates the final signature that wraps all the collected multisig signatures.
+/// The lead signer signs an envelope containing:
+/// - The chain identifier (mainnet/testnet)
+/// - The hash of the entire multisig action (including all signer signatures)
+/// - The nonce
+///
+/// # EIP-712 Domain
+///
+/// Always uses the mainnet multisig domain (chainId 0x66eee) for both mainnet and testnet.
+/// The `hyperliquidChain` field in the message distinguishes between mainnet and testnet.
+///
+/// # Parameters
+///
+/// - `signer`: The lead signer who submits the transaction
+/// - `chain`: The chain (mainnet/testnet) - determines the hyperliquidChain field
+/// - `action`: The complete multisig action with all collected signatures
+/// - `nonce`: Unique transaction nonce
+/// - `maybe_vault_address`: Optional vault address if trading on behalf of a vault
+/// - `maybe_expires_after`: Optional expiration time for the request
 fn sign_rmp_multisig<S: SignerSync>(
     signer: &S,
     chain: Chain,
@@ -1142,7 +1231,35 @@ fn sign_rmp_multisig<S: SignerSync>(
     })
 }
 
-// https://github.com/hyperliquid-dex/hyperliquid-python-sdk/blob/be7523d58297a93d0e938063460c14ae45e9034f/hyperliquid/utils/signing.py#L293
+/// Collects signatures from all signers for a multisig action.
+///
+/// This function implements the Hyperliquid multisig signature collection protocol:
+///
+/// 1. Creates an action hash from: `[multisig_user, lead_signer, action]`
+/// 2. Each signer signs the action hash using EIP-712 with the L1 Agent domain
+/// 3. All signatures are collected and packaged into a `MultiSigAction`
+///
+/// # Address Normalization
+///
+/// Both the multisig user address and lead signer address are normalized to lowercase
+/// before hashing. This ensures consistency across different address representations.
+///
+/// # Signature Collection
+///
+/// Each signer must sign the same action hash. The order of signatures typically matches
+/// the order of signers in the multisig wallet configuration, though the exact requirements
+/// depend on the wallet's setup on Hyperliquid.
+///
+/// # Returns
+///
+/// A `MultiSigAction` containing:
+/// - All collected signatures
+/// - The signature chain ID (always uses mainnet multisig chain ID)
+/// - The payload with multisig address, lead signer, and the action
+///
+/// # Reference
+///
+/// Based on: https://github.com/hyperliquid-dex/hyperliquid-python-sdk/blob/be7523d58297a93d0e938063460c14ae45e9034f/hyperliquid/utils/signing.py#L293
 fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
     lead: Address,
     multi_sig_user: Address,
@@ -1154,12 +1271,17 @@ fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
     // Collect signatures from all signers
     let mut signatures = vec![];
 
+    // Normalize addresses to lowercase for consistent hashing
     let lead = lead.to_string().to_lowercase();
     let multi_sig_user = multi_sig_user.to_string().to_lowercase();
+
     // Hash the envelope: [multi_sig_user (lowercase), outer_signer (lowercase), action]
+    // This hash is what each signer will sign with their private key
     let action_hash = rmp_hash(&(&multi_sig_user, &lead, &inner_action), nonce, None, None)?;
 
+    // Collect a signature from each signer for the action hash
     for signer in signers {
+        // TODO: abstract so we can support TypedData
         let sig = sign_l1_action(signer, chain, action_hash)?;
         signatures.push(sig);
     }

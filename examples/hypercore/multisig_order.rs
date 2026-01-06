@@ -13,10 +13,29 @@ use hypersdk::{
 };
 use rust_decimal::dec;
 
-/// Example demonstrating how to execute a multisig order.
+/// Example demonstrating how to execute a multisig order on Hyperliquid.
 ///
 /// This example shows how to use Hyperliquid's L1 multisig functionality to place an order
-/// that requires multiple signers to authorize the transaction.
+/// that requires multiple signers to authorize the transaction. Multisig orders are useful
+/// for implementing custody solutions, DAOs, or any scenario requiring multiple parties to
+/// approve trading actions.
+///
+/// # Multisig Flow
+///
+/// 1. Create the trading action (e.g., placing an order)
+/// 2. Collect signatures from all required signers
+/// 3. Submit the multisig transaction with all signatures
+/// 4. The exchange verifies all signatures match the multisig wallet configuration
+///
+/// # Usage
+///
+/// ```bash
+/// cargo run --example multisig_order -- \
+///   --private-key KEY1 \
+///   --private-key KEY2 \
+///   --multisig-address 0x... \
+///   --chain mainnet
+/// ```
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -38,17 +57,21 @@ async fn main() -> anyhow::Result<()> {
 
     let client = hypercore::HttpClient::new(args.chain);
 
+    // Parse all private keys into signers
+    // Each signer must be authorized on the multisig wallet
     let signers: Vec<_> = args
         .private_key
         .iter()
         .map(|key| PrivateKeySigner::from_str(key.as_str()).unwrap())
         .collect();
 
-    // Get BTC perpetual market
+    // Fetch BTC perpetual market information
+    // We need the market index to place orders
     let perps = client.perps().await?;
     let btc = perps.iter().find(|perp| perp.name == "BTC").expect("btc");
 
-    // Create the order action
+    // Create the order action to be executed via multisig
+    // This order will buy 0.01 BTC at $87,000 with ALO (Add Liquidity Only) time-in-force
     let order = BatchOrder {
         orders: vec![OrderRequest {
             asset: btc.index,
@@ -64,12 +87,20 @@ async fn main() -> anyhow::Result<()> {
         grouping: OrderGrouping::Na,
     };
 
+    // Generate a unique nonce for this transaction
+    // Using current timestamp ensures uniqueness and prevents replay attacks
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
 
     // Execute multisig order
+    // - Lead signer (signers[0]): The signer who submits the transaction
+    // - Multisig address: The multisig wallet that will execute the action
+    // - All signers: Each signer's signature is collected and included
+    // - Action: The order to be placed
+    // - Nonce: Unique identifier for this transaction
+    //
     // The signature chain ID is automatically determined by the client's chain (mainnet/testnet)
     let resp = client
         .multi_sig(

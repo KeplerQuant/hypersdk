@@ -163,14 +163,26 @@ pub enum Chain {
 impl Chain {
     /// Returns the multisig signature chain ID for this chain.
     ///
+    /// This method returns the chain ID that should be included in the multisig payload's
+    /// `signature_chain_id` field to identify whether the operation is for mainnet or testnet.
+    ///
+    /// # Note
+    ///
+    /// This is different from the EIP-712 domain chain ID used for signing multisig transactions.
+    /// The EIP-712 domain ALWAYS uses `0x66eee` (mainnet multisig chain ID) for both mainnet
+    /// and testnet operations. This method returns the value used in the MESSAGE payload.
+    ///
     /// # Example
     ///
     /// ```
     /// use hypersdk::hypercore::Chain;
     ///
+    /// // Returns the chain ID to use in the multisig payload
     /// assert_eq!(Chain::Mainnet.multisig_chain_id(), "0x66eee");
     /// assert_eq!(Chain::Testnet.multisig_chain_id(), "0x66eef");
     /// ```
+    ///
+    /// See: [`MAINNET_MULTISIG_CHAIN_ID`], [`TESTNET_MULTISIG_CHAIN_ID`]
     #[must_use]
     pub const fn multisig_chain_id(&self) -> &'static str {
         match self {
@@ -184,16 +196,37 @@ impl Chain {
 ///
 /// This is required when signing transactions that involve cross-chain operations
 /// or transfers between HyperCore and HyperEVM.
+///
+/// Value: `0xa4b1` (Arbitrum One mainnet)
 pub const ARBITRUM_SIGNATURE_CHAIN_ID: &str = "0xa4b1";
 
 /// Mainnet L1 multisig signature chain ID.
 ///
-/// Use this when executing multisig transactions on mainnet.
+/// This chain ID is used when constructing EIP-712 signatures for multisig operations
+/// on Hyperliquid mainnet. Unlike regular L1 actions which use the Arbitrum chain ID,
+/// multisig operations use Hyperliquid's custom chain ID.
+///
+/// # Important
+///
+/// This same chain ID (0x66eee) is used in the EIP-712 domain for BOTH mainnet and testnet
+/// multisig operations. The actual chain (mainnet vs testnet) is distinguished by the
+/// `hyperliquidChain` field in the message payload, not by the domain chain ID.
+///
+/// Value: `0x66eee` (421614 in decimal)
+///
+/// See: [`TESTNET_MULTISIG_CHAIN_ID`]
 pub const MAINNET_MULTISIG_CHAIN_ID: &str = "0x66eee";
 
 /// Testnet L1 multisig signature chain ID.
 ///
-/// Use this when executing multisig transactions on testnet.
+/// This chain ID appears in the multisig payload to identify testnet operations,
+/// but note that the EIP-712 domain always uses [`MAINNET_MULTISIG_CHAIN_ID`] (0x66eee)
+/// for both mainnet and testnet. The distinction between mainnet and testnet is made
+/// via the `hyperliquidChain` field in the message, not the domain chain ID.
+///
+/// Value: `0x66eef` (421615 in decimal)
+///
+/// See: [`MAINNET_MULTISIG_CHAIN_ID`]
 pub const TESTNET_MULTISIG_CHAIN_ID: &str = "0x66eef";
 
 /// USDC contract address on HyperEVM.

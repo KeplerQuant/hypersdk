@@ -1697,8 +1697,6 @@ pub(super) mod solidity {
             uint64 nonce;
         }
 
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
         struct SendMultiSig {
             string hyperliquidChain;
             bytes32 multiSigActionHash;

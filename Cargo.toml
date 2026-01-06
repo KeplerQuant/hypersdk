@@ -112,7 +112,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 alloy = { version = "1.1.1", default-features = false, features = ["contract", "eip712", "getrandom", "providers", "reqwest", "rpc", "rpc-types", "signer-local", "signers", "sol-types"] }
 anyhow = "1.0.100"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-const-hex = "1"
+const-hex = { version = "1.17", features = ["serde"] }
 derive_more = { version = "2", features = ["display", "is_variant"] }
 either = { version = "1", features = ["serde"] }
 futures = { version = "0.3", default-features = false, features = ["std"] }

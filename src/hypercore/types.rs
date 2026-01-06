@@ -81,7 +81,7 @@ use alloy::{
     sol_types::{SolStruct, eip712_domain},
 };
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_with::{DisplayFromStr, serde_as};
 
 use crate::hypercore::{Cloid, OidOrCloid, SpotToken};
@@ -103,6 +103,15 @@ pub(super) const ARBITRUM_MAINNET_EIP712_DOMAIN: Eip712Domain = eip712_domain! {
     name: "HyperliquidSignTransaction",
     version: "1",
     chain_id: 42161,
+    verifying_contract: Address::ZERO,
+};
+
+/// Domain for L1 multisig mainnet EIP‑712 signing.
+/// This domain is used when creating multisig signatures on mainnet (chainId 0x66eee = 421614).
+pub(super) const MULTISIG_MAINNET_EIP712_DOMAIN: Eip712Domain = eip712_domain! {
+    name: "HyperliquidSignTransaction",
+    version: "1",
+    chain_id: 421614,
     verifying_contract: Address::ZERO,
 };
 
@@ -703,6 +712,7 @@ impl Fill {
 ///
 /// Basic information needed for creating or updating an order.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde_as]
 #[serde(rename_all = "camelCase")]
 pub struct BasicOrder {
     pub timestamp: u64,
@@ -1150,11 +1160,37 @@ impl OrderResponseStatus {
 /// Signature.
 ///
 /// Represents an EIP‑712 signature split into its components.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Serialize)]
+#[serde_as]
 pub struct Signature {
+    #[serde(serialize_with = "serialize_as_hex")]
     pub r: U256,
+    #[serde(serialize_with = "serialize_as_hex")]
     pub s: U256,
     pub v: u64,
+}
+
+fn serialize_as_hex<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&format!("{:#x}", value))
+}
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "r: 0x{:x}, s: 0x{:x}, v: {}", self.r, self.r, self.v)
+    }
+}
+
+impl fmt::Debug for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Signature")
+            .field("r", &format!("0x{:x}", self.r))
+            .field("s", &format!("0x{:x}", self.s))
+            .field("v", &self.v)
+            .finish()
+    }
 }
 
 impl From<Signature> for alloy::signers::Signature {
@@ -1201,6 +1237,7 @@ pub enum OrderGrouping {
 /// Represents a single order within a batch.
 #[derive(Clone, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
+#[serde_as]
 pub struct OrderRequest {
     #[serde(rename = "a")]
     pub asset: usize,
@@ -1215,8 +1252,15 @@ pub struct OrderRequest {
     #[serde(rename = "t")]
     pub order_type: OrderTypePlacement,
     #[serde(rename = "c")]
-    #[serde(with = "const_hex")]
+    #[serde(serialize_with = "serialize_cloid_as_hex")]
     pub cloid: Cloid,
+}
+
+fn serialize_cloid_as_hex<S>(value: &Cloid, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&format!("{:#x}", value))
 }
 
 /// Order type for the placement.
@@ -1525,9 +1569,9 @@ pub enum HyperliquidChain {
 #[serde(rename_all = "camelCase")]
 pub struct MultiSigPayload {
     /// The multisig account address
-    pub multi_sig_user: Address,
+    pub multi_sig_user: String,
     /// The address executing the multisig action
-    pub outer_signer: Address,
+    pub outer_signer: String,
     /// The inner action to execute
     pub action: Box<Action>,
 }
@@ -1539,7 +1583,7 @@ pub struct MultiSigPayload {
 #[serde(rename_all = "camelCase")]
 pub struct MultiSigAction {
     /// Signature chain ID (0x66eee for L1 multisig)
-    pub signature_chain_id: String,
+    pub signature_chain_id: &'static str,
     /// Signatures from authorized signers
     pub signatures: Vec<Signature>,
     /// The multisig payload
@@ -1654,7 +1698,8 @@ pub(super) mod solidity {
         }
 
         #[derive(serde::Serialize)]
-        struct MultiSigEnvelope {
+        #[serde(rename_all = "camelCase")]
+        struct SendMultiSig {
             string hyperliquidChain;
             bytes32 multiSigActionHash;
             uint64 nonce;

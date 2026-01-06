@@ -58,7 +58,7 @@ use std::{collections::HashMap, fmt, time::Duration};
 
 use alloy::{
     dyn_abi::TypedData,
-    primitives::Address,
+    primitives::{Address, B256},
     signers::{Signer, SignerSync},
 };
 use anyhow::{Context, Result};
@@ -70,8 +70,8 @@ use url::Url;
 
 use super::types::HyperliquidChain;
 use crate::hypercore::{
-    ARBITRUM_SIGNATURE_CHAIN_ID, Chain, Cloid, OidOrCloid, PerpMarket, SpotMarket, SpotToken,
-    mainnet_url, testnet_url,
+    ARBITRUM_SIGNATURE_CHAIN_ID, Chain, Cloid, MAINNET_MULTISIG_CHAIN_ID, OidOrCloid, PerpMarket,
+    SpotMarket, SpotToken, mainnet_url, testnet_url,
     types::{
         Action, ActionRequest, ApiResponse, BasicOrder, BatchCancel, BatchCancelCloid, BatchModify,
         BatchOrder, CORE_MAINNET_EIP712_DOMAIN, Fill, MultiSigAction, MultiSigPayload, OkResponse,
@@ -1028,7 +1028,6 @@ impl Client {
         async move {
             let req = res?;
             let text = serde_json::to_string(&req).context("serde_json::to_string")?;
-            println!(">> {text}");
             let res = http_client
                 .post(url)
                 .timeout(Duration::from_secs(5))
@@ -1075,6 +1074,23 @@ fn sign_rmp<S: SignerSync>(
     let expires_after = maybe_expires_after.map(|after| after.timestamp_millis() as u64);
     let connection_id = action.hash(nonce, maybe_vault_address, expires_after)?;
 
+    let signature = sign_l1_action(signer, chain, connection_id)?;
+
+    Ok(ActionRequest {
+        signature,
+        action,
+        nonce,
+        vault_address: maybe_vault_address,
+        expires_after,
+    })
+}
+
+#[inline(always)]
+fn sign_l1_action<S: SignerSync>(
+    signer: &S,
+    chain: Chain,
+    connection_id: B256,
+) -> anyhow::Result<Signature> {
     let sig = signer.sign_typed_data_sync(
         &solidity::Agent {
             source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
@@ -1082,14 +1098,7 @@ fn sign_rmp<S: SignerSync>(
         },
         &CORE_MAINNET_EIP712_DOMAIN,
     )?;
-
-    Ok(ActionRequest {
-        signature: sig.into(),
-        action,
-        nonce,
-        vault_address: maybe_vault_address,
-        expires_after,
-    })
+    Ok(sig.into())
 }
 
 fn sign_rmp_multisig<S: SignerSync>(
@@ -1103,13 +1112,25 @@ fn sign_rmp_multisig<S: SignerSync>(
     let expires_after = maybe_expires_after.map(|after| after.timestamp_millis() as u64);
     let multsig_hash = rmp_hash(&action, nonce, maybe_vault_address, expires_after)?;
 
-    let envelope = solidity::MultiSigEnvelope {
-        hyperliquidChain: chain.to_string(),
-        multiSigActionHash: multsig_hash,
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Envelope {
+        hyperliquid_chain: String,
+        multi_sig_action_hash: String,
+        nonce: u64,
+    }
+
+    let envelope = Envelope {
+        hyperliquid_chain: chain.to_string(),
+        multi_sig_action_hash: multsig_hash.to_string(),
         nonce,
     };
 
-    let typed_data = get_typed_data::<solidity::MultiSigEnvelope>(&envelope);
+    // Always use the mainnet multisig domain (chainId 0x66eee) for both mainnet and testnet
+    // The hyperliquidChain field in the message distinguishes between mainnet and testnet
+    let mut typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope);
+    typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
+
     let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?;
 
     Ok(ActionRequest {
@@ -1126,33 +1147,30 @@ fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
     lead: Address,
     multi_sig_user: Address,
     signers: impl Iterator<Item = &'a S>,
-    action: Action,
+    inner_action: Action,
     nonce: u64,
     chain: Chain,
 ) -> Result<MultiSigAction> {
     // Collect signatures from all signers
     let mut signatures = vec![];
+
+    let lead = lead.to_string().to_lowercase();
+    let multi_sig_user = multi_sig_user.to_string().to_lowercase();
+    // Hash the envelope: [multi_sig_user (lowercase), outer_signer (lowercase), action]
+    let action_hash = rmp_hash(&(&multi_sig_user, &lead, &inner_action), nonce, None, None)?;
+
     for signer in signers {
-        let action_hash = rmp_hash(&(lead, multi_sig_user, &action), nonce, None, None)?;
-        let sig = signer
-            .sign_typed_data_sync(
-                &solidity::Agent {
-                    source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
-                    connectionId: action_hash,
-                },
-                &CORE_MAINNET_EIP712_DOMAIN,
-            )
-            .context("signature")?;
-        signatures.push(sig.into());
+        let sig = sign_l1_action(signer, chain, action_hash)?;
+        signatures.push(sig);
     }
 
     Ok(MultiSigAction {
-        signature_chain_id: chain.multisig_chain_id().to_owned(),
+        signature_chain_id: MAINNET_MULTISIG_CHAIN_ID,
         signatures,
         payload: MultiSigPayload {
             multi_sig_user,
             outer_signer: lead,
-            action: Box::new(action),
+            action: Box::new(inner_action),
         },
     })
 }
@@ -1183,12 +1201,15 @@ enum InfoRequest {
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    use alloy::signers::local::PrivateKeySigner;
+    use rust_decimal::{Decimal, dec};
 
     use super::*;
     use crate::hypercore::{
         ARBITRUM_SIGNATURE_CHAIN_ID,
-        types::{self, HyperliquidChain},
+        types::{self, HyperliquidChain, OrderRequest, OrderTypePlacement, TimeInForce},
     };
 
     // #[tokio::test]
@@ -1219,5 +1240,67 @@ mod tests {
 
         let expected_sig = "0xeca6267bcaadc4c0ae1aed73f5a2c45fcdbb7271f2e9356992404e5d4bad75a3572e08fe93f17755abadb7f84be7d1e9c4ce48bb5633e339bc430c672d5a20ed1b";
         assert_eq!(signature.to_string(), expected_sig);
+    }
+
+    #[test]
+    fn test_sign_multi_sig_l1_action_payload() -> Result<()> {
+        let wallet1 = "0x0123456789012345678901234567890123456789012345678901234567890123"
+            .parse::<PrivateKeySigner>()
+            .unwrap();
+        let wallet2 = "0x0000000000000000000000000000000000000000000000000000000000000001"
+            .parse::<PrivateKeySigner>()
+            .unwrap();
+
+        let wallets = [wallet1, wallet2];
+
+        let multi_sig_user =
+            alloy::primitives::Address::from_str("0x0000000000000000000000000000000000000005")
+                .unwrap();
+        let outer_signer =
+            alloy::primitives::Address::from_str("0x0d1d9635d0640821d15e323ac8adadfa9c111414")
+                .unwrap();
+
+        let action = Action::Order(BatchOrder {
+            orders: vec![OrderRequest {
+                asset: 4,
+                is_buy: true,
+                limit_px: dec!(1100),
+                sz: dec!(0.2),
+                reduce_only: false,
+                order_type: OrderTypePlacement::Limit {
+                    tif: TimeInForce::Gtc,
+                },
+                cloid: Cloid::ZERO,
+            }],
+            grouping: types::OrderGrouping::Na,
+        });
+
+        let nonce = 0u64;
+
+        let signatures_mainnet = multisig_collect_signatures(
+            outer_signer,
+            multi_sig_user,
+            wallets.iter(),
+            action,
+            nonce,
+            Chain::Mainnet,
+        )?;
+
+        assert_eq!(signatures_mainnet.signatures.len(), 2);
+
+        // let signatures_testnet = sign_multi_sig_l1_action_payload(
+        //     &wallets,
+        //     &action,
+        //     multi_sig_user,
+        //     outer_signer,
+        //     None,
+        //     nonce,
+        //     None,
+        //     false,
+        // )?;
+
+        // assert_eq!(signatures_testnet.len(), 2);
+
+        Ok(())
     }
 }

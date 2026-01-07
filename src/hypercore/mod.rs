@@ -160,38 +160,6 @@ pub enum Chain {
     Testnet,
 }
 
-impl Chain {
-    /// Returns the multisig signature chain ID for this chain.
-    ///
-    /// This method returns the chain ID that should be included in the multisig payload's
-    /// `signature_chain_id` field to identify whether the operation is for mainnet or testnet.
-    ///
-    /// # Note
-    ///
-    /// This is different from the EIP-712 domain chain ID used for signing multisig transactions.
-    /// The EIP-712 domain ALWAYS uses `0x66eee` (mainnet multisig chain ID) for both mainnet
-    /// and testnet operations. This method returns the value used in the MESSAGE payload.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use hypersdk::hypercore::Chain;
-    ///
-    /// // Returns the chain ID to use in the multisig payload
-    /// assert_eq!(Chain::Mainnet.multisig_chain_id(), "0x66eee");
-    /// assert_eq!(Chain::Testnet.multisig_chain_id(), "0x66eef");
-    /// ```
-    ///
-    /// See: [`MAINNET_MULTISIG_CHAIN_ID`], [`TESTNET_MULTISIG_CHAIN_ID`]
-    #[must_use]
-    pub const fn multisig_chain_id(&self) -> &'static str {
-        match self {
-            Self::Mainnet => MAINNET_MULTISIG_CHAIN_ID,
-            Self::Testnet => TESTNET_MULTISIG_CHAIN_ID,
-        }
-    }
-}
-
 /// Arbitrum mainnet chain ID used for EIP-712 signatures.
 ///
 /// This is required when signing transactions that involve cross-chain operations
@@ -216,18 +184,6 @@ pub const ARBITRUM_SIGNATURE_CHAIN_ID: &str = "0xa4b1";
 ///
 /// See: [`TESTNET_MULTISIG_CHAIN_ID`]
 pub const MAINNET_MULTISIG_CHAIN_ID: &str = "0x66eee";
-
-/// Testnet L1 multisig signature chain ID.
-///
-/// This chain ID appears in the multisig payload to identify testnet operations,
-/// but note that the EIP-712 domain always uses [`MAINNET_MULTISIG_CHAIN_ID`] (0x66eee)
-/// for both mainnet and testnet. The distinction between mainnet and testnet is made
-/// via the `hyperliquidChain` field in the message, not the domain chain ID.
-///
-/// Value: `0x66eef` (421615 in decimal)
-///
-/// See: [`MAINNET_MULTISIG_CHAIN_ID`]
-pub const TESTNET_MULTISIG_CHAIN_ID: &str = "0x66eef";
 
 /// USDC contract address on HyperEVM.
 ///
@@ -339,10 +295,10 @@ pub fn testnet_ws() -> WebSocket {
     WebSocket::new(testnet_websocket_url())
 }
 
-/// Price tick table for determining valid price increments.
+/// Price tick configuration for determining valid price increments.
 ///
 /// Hyperliquid enforces different tick size constraints for spot and perpetual markets.
-/// This table provides O(1) tick size calculation using a unified significant figures algorithm.
+/// This struct provides O(1) tick size calculation using a unified significant figures algorithm.
 ///
 /// # Algorithm
 ///
@@ -385,14 +341,14 @@ pub fn testnet_ws() -> WebSocket {
 ///
 /// See: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/tick-and-lot-size>
 #[derive(Debug, Clone, Copy)]
-pub struct PriceTickTable {
+pub struct PriceTick {
     /// Maximum decimal places allowed for this market.
     /// - Spot: max_decimals = 8 - sz_decimals
     /// - Perp: max_decimals = 6 - sz_decimals
     max_decimals: i64,
 }
 
-impl PriceTickTable {
+impl PriceTick {
     /// Returns the valid tick size for a given price.
     ///
     /// The tick size determines the minimum price increment for orders at this price level.
@@ -411,16 +367,16 @@ impl PriceTickTable {
     /// # Examples
     ///
     /// ```no_run
-    /// # use hypersdk::hypercore::PriceTickTable;
+    /// # use hypersdk::hypercore::PriceTick;
     /// # use rust_decimal_macros::dec;
     /// // BTC perp: max_decimals = 1
-    /// let btc_table = PriceTickTable { max_decimals: 1 };
+    /// let btc_table = PriceTick { max_decimals: 1 };
     ///
     /// // 5-digit price: decimals = 5-5 = 0, clamped to 0 → tick = 1
     /// assert_eq!(btc_table.tick_for(dec!(93231)), Some(dec!(1)));
     ///
     /// // SOL perp: max_decimals = 4
-    /// let sol_table = PriceTickTable { max_decimals: 4 };
+    /// let sol_table = PriceTick { max_decimals: 4 };
     ///
     /// // 3-digit price: decimals = 5-3 = 2, clamped to 2 → tick = 0.01
     /// assert_eq!(sol_table.tick_for(dec!(137)), Some(dec!(0.01)));
@@ -443,9 +399,9 @@ impl PriceTickTable {
     /// # Example
     ///
     /// ```no_run
-    /// # use hypersdk::hypercore::PriceTickTable;
+    /// # use hypersdk::hypercore::PriceTick;
     /// # use rust_decimal_macros::dec;
-    /// # let table = PriceTickTable { max_decimals: 0 };
+    /// # let table = PriceTick { max_decimals: 0 };
     /// let price = dec!(50123.456);
     /// if let Some(rounded) = table.round(price) {
     ///     println!("Rounded price: {}", rounded);
@@ -459,41 +415,80 @@ impl PriceTickTable {
         Some(rounded)
     }
 
-    /// Rounds a price to the nearest valid tick based on order side and conservativeness.
+    /// Rounds a price to the nearest valid tick based on order side and aggressiveness.
     ///
-    /// This method allows directional rounding to favor either the maker or taker depending
-    /// on the order side and whether you want to be conservative (safer pricing) or aggressive.
+    /// This method provides directional rounding control to optimize order placement strategy.
+    /// Unlike the neutral [`round`](Self::round) method, this allows you to specify whether
+    /// you want conservative (safer) or aggressive (more likely to fill) pricing.
     ///
     /// # Parameters
     ///
-    /// - `side`: The order side (Bid/Ask)
-    /// - `price`: The price to round
-    /// - `conservative`: If true, rounds in favor of maker (safer); if false, rounds in favor of taker (aggressive)
+    /// - `side`: The order side ([`Side::Bid`] for buy orders, [`Side::Ask`] for sell orders)
+    /// - `price`: The price to round to a valid tick
+    /// - `conservative`: Rounding strategy flag
+    ///   - `true`: Conservative rounding (safer for maker, less likely to fill immediately)
+    ///   - `false`: Aggressive rounding (favors taker, more likely to fill immediately)
     ///
     /// # Rounding Behavior
     ///
-    /// - **Ask + Conservative**: Rounds UP (higher sell price, safer for seller)
-    /// - **Ask + Aggressive**: Rounds DOWN (lower sell price, more likely to fill)
-    /// - **Bid + Conservative**: Rounds DOWN (lower buy price, safer for buyer)
-    /// - **Bid + Aggressive**: Rounds UP (higher buy price, more likely to fill)
+    /// The rounding direction depends on both the order side and the conservative flag:
     ///
-    /// Returns `None` if the price is invalid.
+    /// | Side | Conservative | Direction | Rationale |
+    /// |------|-------------|-----------|-----------|
+    /// | Ask (Sell) | `true` | **UP** | Higher sell price → safer for seller, less likely to fill |
+    /// | Ask (Sell) | `false` | **DOWN** | Lower sell price → more competitive, more likely to fill |
+    /// | Bid (Buy) | `true` | **DOWN** | Lower buy price → safer for buyer, less likely to fill |
+    /// | Bid (Buy) | `false` | **UP** | Higher buy price → more competitive, more likely to fill |
+    ///
+    /// # Use Cases
+    ///
+    /// **Conservative (Maker Strategy)**
+    /// - Use when placing limit orders away from the market price
+    /// - Prioritizes better execution price over fill likelihood
+    /// - Suitable for market making or accumulating positions over time
+    ///
+    /// **Aggressive (Taker Strategy)**
+    /// - Use when you want orders to fill quickly
+    /// - Prioritizes execution certainty over price optimization
+    /// - Suitable for closing positions urgently or market taking
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Decimal)`: The rounded price at a valid tick
+    /// - `None`: If the price is invalid (zero, negative, or causes overflow)
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// # use hypersdk::hypercore::{PriceTickTable, types::Side};
+    /// # use hypersdk::hypercore::{PriceTick, types::Side};
     /// # use rust_decimal_macros::dec;
-    /// let table = PriceTickTable { max_decimals: 1 };
+    /// let tick = PriceTick { max_decimals: 1 };
     ///
-    /// // Conservative ask: rounds up to safer (higher) price
-    /// let price = table.round_by_side(Side::Ask, dec!(50123.4), true);
-    /// // Returns Some(50124.0) - rounded up
+    /// // Conservative sell: rounds UP (50123.4 → 50124.0)
+    /// // Safer for seller but less likely to fill immediately
+    /// let conservative_ask = tick.round_by_side(Side::Ask, dec!(50123.4), true);
+    /// assert_eq!(conservative_ask, Some(dec!(50124.0)));
     ///
-    /// // Aggressive bid: rounds up to more likely fill
-    /// let price = table.round_by_side(Side::Bid, dec!(50123.4), false);
-    /// // Returns Some(50124.0) - rounded up
+    /// // Aggressive sell: rounds DOWN (50123.4 → 50123.0)
+    /// // More competitive price, more likely to fill
+    /// let aggressive_ask = tick.round_by_side(Side::Ask, dec!(50123.4), false);
+    /// assert_eq!(aggressive_ask, Some(dec!(50123.0)));
+    ///
+    /// // Conservative buy: rounds DOWN (50123.4 → 50123.0)
+    /// // Safer for buyer but less likely to fill immediately
+    /// let conservative_bid = tick.round_by_side(Side::Bid, dec!(50123.4), true);
+    /// assert_eq!(conservative_bid, Some(dec!(50123.0)));
+    ///
+    /// // Aggressive buy: rounds UP (50123.4 → 50124.0)
+    /// // More competitive price, more likely to fill
+    /// let aggressive_bid = tick.round_by_side(Side::Bid, dec!(50123.4), false);
+    /// assert_eq!(aggressive_bid, Some(dec!(50124.0)));
     /// ```
+    ///
+    /// # See Also
+    ///
+    /// - [`round`](Self::round): Neutral rounding (midpoint toward zero)
+    /// - [`tick_for`](Self::tick_for): Get the tick size for a given price
     pub fn round_by_side(&self, side: Side, price: Decimal, conservative: bool) -> Option<Decimal> {
         let tick = self.tick_for(price)?;
         let strategy = match (side, conservative) {
@@ -511,23 +506,23 @@ impl PriceTickTable {
     }
 }
 
-/// Creates a price tick table for a spot market.
+/// Creates a price tick configuration for a spot market.
 ///
 /// See: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/tick-and-lot-size>
-fn build_price_ticks(sz_decimals: i64) -> PriceTickTable {
+fn build_price_ticks(sz_decimals: i64) -> PriceTick {
     let max_decimals = 8 - sz_decimals;
-    PriceTickTable { max_decimals }
+    PriceTick { max_decimals }
 }
 
-/// Creates a price tick table for a perpetual market.
+/// Creates a price tick configuration for a perpetual market.
 ///
 /// For perps, the max significant figures is 5 and max decimal places is 6.
 /// This function uses: max_decimals = 6 - sz_decimals (as a construction parameter)
 ///
 /// See: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/tick-and-lot-size>
-fn build_perp_price_ticks(sz_decimals: i64) -> PriceTickTable {
+fn build_perp_price_ticks(sz_decimals: i64) -> PriceTick {
     let max_decimals = 6 - sz_decimals;
-    PriceTickTable { max_decimals }
+    PriceTick { max_decimals }
 }
 
 /// Perpetual futures contract market.
@@ -567,8 +562,103 @@ pub struct PerpMarket {
     pub isolated_margin: bool,
     /// Margin mode for this market
     pub margin_mode: Option<MarginMode>,
-    /// Price tick table for valid price increments
-    pub table: PriceTickTable,
+    /// Price tick configuration for valid price increments
+    pub table: PriceTick,
+}
+
+impl PerpMarket {
+    /// Returns the market symbol (same as name for perps).
+    #[must_use]
+    pub fn symbol(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the price tick configuration for this market.
+    #[must_use]
+    pub fn tick_table(&self) -> &PriceTick {
+        &self.table
+    }
+
+    /// Returns the tick size for a given price in this market.
+    ///
+    /// See [`PriceTick::tick_for`] for details on the calculation.
+    pub fn tick_for(&self, price: Decimal) -> Option<Decimal> {
+        self.table.tick_for(price)
+    }
+
+    /// Rounds a price to the nearest valid tick for this market.
+    ///
+    /// Uses midpoint-toward-zero rounding strategy (round half down).
+    ///
+    /// Returns `None` if the price is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let rounded = market.round_price(dec!(93231.23));
+    /// assert_eq!(rounded, Some(dec!(93231)));
+    /// ```
+    pub fn round_price(&self, price: Decimal) -> Option<Decimal> {
+        self.table.round(price)
+    }
+
+    /// Rounds a price based on order side and trading strategy.
+    ///
+    /// This method provides directional rounding to optimize order placement. Use conservative
+    /// rounding for limit orders (better price, less likely to fill) or aggressive rounding
+    /// for market-taking orders (worse price, more likely to fill).
+    ///
+    /// # Parameters
+    ///
+    /// - `side`: Order side ([`Side::Bid`] for buy, [`Side::Ask`] for sell)
+    /// - `price`: The price to round
+    /// - `conservative`: Rounding strategy
+    ///   - `true`: Conservative (maker strategy, better price)
+    ///   - `false`: Aggressive (taker strategy, faster fill)
+    ///
+    /// # Rounding Direction
+    ///
+    /// | Side | Conservative | Direction | Use Case |
+    /// |------|-------------|-----------|----------|
+    /// | Ask | `true` | UP | Limit sell away from market |
+    /// | Ask | `false` | DOWN | Aggressive sell / market take |
+    /// | Bid | `true` | DOWN | Limit buy away from market |
+    /// | Bid | `false` | UP | Aggressive buy / market take |
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Decimal)`: Rounded price at a valid tick
+    /// - `None`: If price is invalid
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use hypersdk::hypercore::{PerpMarket, SpotToken, PriceTick, types::Side};
+    /// # use rust_decimal_macros::dec;
+    /// # let market = PerpMarket {
+    /// #     name: "BTC".into(), index: 0, sz_decimals: 5,
+    /// #     collateral: SpotToken { name: "USDC".into(), index: 0, token_id: Default::default(),
+    /// #                             evm_contract: None, cross_chain_address: None, sz_decimals: 6,
+    /// #                             wei_decimals: 6, evm_extra_decimals: 0 },
+    /// #     max_leverage: 50, isolated_margin: false, margin_mode: None,
+    /// #     table: PriceTick { max_decimals: 1 }
+    /// # };
+    /// // Conservative sell: round UP for better price
+    /// let ask = market.round_by_side(Side::Ask, dec!(93231.4), true);
+    /// assert_eq!(ask, Some(dec!(93232)));
+    ///
+    /// // Aggressive buy: round UP for faster fill
+    /// let bid = market.round_by_side(Side::Bid, dec!(93231.4), false);
+    /// assert_eq!(bid, Some(dec!(93232)));
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// - [`PriceTick::round_by_side`]: Detailed explanation of rounding logic
+    /// - [`round_price`](Self::round_price): Neutral rounding
+    pub fn round_by_side(&self, side: Side, price: Decimal, conservative: bool) -> Option<Decimal> {
+        self.table.round_by_side(side, price, conservative)
+    }
 }
 
 /// Spot market trading pair.
@@ -600,33 +690,12 @@ pub struct SpotMarket {
     pub index: usize,
     /// Base token (tokens[0]) and quote token (tokens[1])
     pub tokens: [SpotToken; 2],
-    /// Price tick table for valid price increments
-    pub table: PriceTickTable,
+    /// Price tick configuration for valid price increments
+    pub table: PriceTick,
 }
 
 impl SpotMarket {
     /// Returns the trading symbol in "BASE/QUOTE" format.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use hypersdk::hypercore::{SpotMarket, SpotToken, PriceTickTable};
-    /// # let base = SpotToken {
-    /// #     name: "BTC".into(), index: 0, token_id: Default::default(),
-    /// #     evm_contract: None, cross_chain_address: None, sz_decimals: 8,
-    /// #     wei_decimals: 8, evm_extra_decimals: 0
-    /// # };
-    /// # let quote = SpotToken {
-    /// #     name: "USDC".into(), index: 1, token_id: Default::default(),
-    /// #     evm_contract: None, cross_chain_address: None, sz_decimals: 6,
-    /// #     wei_decimals: 6, evm_extra_decimals: 0
-    /// # };
-    /// # let market = SpotMarket {
-    /// #     name: "BTC/USDC".into(), index: 10000, tokens: [base, quote],
-    /// #     table: PriceTickTable { max_decimals: 0 }
-    /// # };
-    /// assert_eq!(market.symbol(), "BTC/USDC");
-    /// ```
     #[must_use]
     pub fn symbol(&self) -> String {
         format!("{}/{}", self.tokens[0].name, self.tokens[1].name)
@@ -644,17 +713,95 @@ impl SpotMarket {
         &self.tokens[1]
     }
 
-    /// Returns the price tick table for this market.
+    /// Returns the price tick configuration for this market.
     #[must_use]
-    pub fn tick_table(&self) -> &PriceTickTable {
+    pub fn tick_table(&self) -> &PriceTick {
         &self.table
+    }
+
+    /// Returns the tick size for a given price in this market.
+    ///
+    /// See [`PriceTick::tick_for`] for details on the calculation.
+    pub fn tick_for(&self, price: Decimal) -> Option<Decimal> {
+        self.table.tick_for(price)
     }
 
     /// Rounds a price to the nearest valid tick for this market.
     ///
+    /// Uses midpoint-toward-zero rounding strategy (round half down).
+    ///
     /// Returns `None` if the price is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use hypersdk::hypercore::{SpotMarket, SpotToken, PriceTick};
+    /// # use rust_decimal_macros::dec;
+    /// # let market = SpotMarket {
+    /// #     name: "BTC/USDC".into(), index: 10000,
+    /// #     tokens: [
+    /// #         SpotToken { name: "BTC".into(), index: 0, token_id: Default::default(),
+    /// #                     evm_contract: None, cross_chain_address: None, sz_decimals: 8,
+    /// #                     wei_decimals: 8, evm_extra_decimals: 0 },
+    /// #         SpotToken { name: "USDC".into(), index: 1, token_id: Default::default(),
+    /// #                     evm_contract: None, cross_chain_address: None, sz_decimals: 6,
+    /// #                     wei_decimals: 6, evm_extra_decimals: 0 }
+    /// #     ],
+    /// #     table: PriceTick { max_decimals: 2 }
+    /// # };
+    /// let rounded = market.round_price(dec!(50123.456));
+    /// assert_eq!(rounded, Some(dec!(50123.46)));
+    /// ```
     pub fn round_price(&self, price: Decimal) -> Option<Decimal> {
         self.table.round(price)
+    }
+
+    /// Rounds a price based on order side and trading strategy.
+    ///
+    /// This method provides directional rounding to optimize order placement. Use conservative
+    /// rounding for limit orders (better price, less likely to fill) or aggressive rounding
+    /// for market-taking orders (worse price, more likely to fill).
+    ///
+    /// # Parameters
+    ///
+    /// - `side`: Order side ([`Side::Bid`] for buy, [`Side::Ask`] for sell)
+    /// - `price`: The price to round
+    /// - `conservative`: Rounding strategy
+    ///   - `true`: Conservative (maker strategy, better price)
+    ///   - `false`: Aggressive (taker strategy, faster fill)
+    ///
+    /// # Rounding Direction
+    ///
+    /// | Side | Conservative | Direction | Use Case |
+    /// |------|-------------|-----------|----------|
+    /// | Ask | `true` | UP | Limit sell away from market |
+    /// | Ask | `false` | DOWN | Aggressive sell / market take |
+    /// | Bid | `true` | DOWN | Limit buy away from market |
+    /// | Bid | `false` | UP | Aggressive buy / market take |
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Decimal)`: Rounded price at a valid tick
+    /// - `None`: If price is invalid
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Conservative sell: round UP for better price
+    /// let ask = market.round_by_side(Side::Ask, dec!(50123.4), true);
+    /// assert_eq!(ask, Some(dec!(50124)));
+    ///
+    /// // Aggressive buy: round UP for faster fill
+    /// let bid = market.round_by_side(Side::Bid, dec!(50123.4), false);
+    /// assert_eq!(bid, Some(dec!(50124)));
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// - [`PriceTick::round_by_side`]: Detailed explanation of rounding logic
+    /// - [`round_price`](Self::round_price): Neutral rounding
+    pub fn round_by_side(&self, side: Side, price: Decimal, conservative: bool) -> Option<Decimal> {
+        self.table.round_by_side(side, price, conservative)
     }
 }
 

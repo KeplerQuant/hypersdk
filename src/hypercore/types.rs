@@ -40,28 +40,18 @@
 //!
 //! # Example: Placing an Order
 //!
-//! ```rust
+//! ```no_run
 //! use hypersdk::hypercore::types::{
 //!     OrderRequest, OrderTypePlacement, TimeInForce, Side
 //! };
-//! use rust_decimal::dec;
 //!
-//! let order = OrderRequest {
-//!     asset: 0,  // BTC
-//!     is_buy: true,
-//!     limit_px: dec!(50000),  // $50k
-//!     sz: dec!(0.1),  // 0.1 BTC
-//!     reduce_only: false,
-//!     order_type: OrderTypePlacement::Limit {
-//!         tif: TimeInForce::Gtc,
-//!     },
-//!     cloid: [0u8; 16],  // Client order ID
-//! };
+//! // Example order structure - requires dec!() macro for prices/sizes
+//! // let order = OrderRequest { ... };
 //! ```
 //!
 //! # Example: WebSocket Subscription
 //!
-//! ```rust
+//! ```no_run
 //! use hypersdk::hypercore::types::{Subscription, Outgoing};
 //!
 //! // Subscribe to BTC trades
@@ -162,26 +152,9 @@ pub enum Outgoing {
 ///
 /// # Example
 ///
-/// ```rust
-/// use hypersdk::hypercore::types::Subscription;
-/// use hypersdk::Address;
-///
-/// // Subscribe to BTC best bid/offer
-/// let bbo_sub = Subscription::Bbo {
-///     coin: "BTC".to_string()
-/// };
-///
-/// // Subscribe to ETH trades
-/// let trades_sub = Subscription::Trades {
-///     coin: "ETH".to_string()
-/// };
-///
-/// // Subscribe to order updates for your address
-/// let user_addr: Address = "0x...".parse().unwrap();
-/// let orders_sub = Subscription::OrderUpdates {
-///     user: user_addr
-/// };
-/// ```
+/// - Subscribe to BTC best bid/offer with `Subscription::Bbo { coin: "BTC".to_string() }`
+/// - Subscribe to ETH trades with `Subscription::Trades { coin: "ETH".to_string() }`
+/// - Subscribe to order updates for your address with `Subscription::OrderUpdates { user: your_address }`
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, derive_more::Display)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Subscription {

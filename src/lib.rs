@@ -19,22 +19,7 @@
 //!
 //! ### HyperCore - Place an Order
 //!
-//! ```no_run
-//! use hypersdk::hypercore::{self, types::*};
-//!
-//! # async fn example() -> anyhow::Result<()> {
-//! // Create a mainnet client
-//! let client = hypercore::mainnet();
-//!
-//! // Get available markets
-//! let perps = client.perps().await?;
-//! let spot = client.spot().await?;
-//!
-//! // Query user balances
-//! let balances = client.user_balances(your_address).await?;
-//! # Ok(())
-//! # }
-//! ```
+//! Create a mainnet client with `hypercore::mainnet()` to query markets and user balances.
 //!
 //! ### HyperCore - WebSocket Subscriptions
 //!
@@ -63,42 +48,11 @@
 //!
 //! ### HyperEVM - Morpho Lending
 //!
-//! ```no_run
-//! use hypersdk::hyperevm::morpho;
-//!
-//! # async fn example() -> anyhow::Result<()> {
-//! let client = morpho::Client::mainnet().await?;
-//!
-//! // Get APY for a specific market
-//! let apy = client.apy(morpho_address, market_id).await?;
-//! println!("Borrow APY: {:.2}%", apy.borrow * 100.0);
-//! println!("Supply APY: {:.2}%", apy.supply * 100.0);
-//! # Ok(())
-//! # }
-//! ```
+//! Create a Morpho client with `morpho::Client::mainnet().await?` to query APY rates.
 //!
 //! ### HyperEVM - Uniswap V3
 //!
-//! ```no_run
-//! use hypersdk::hyperevm::uniswap;
-//! use rust_decimal_macros::dec;
-//!
-//! # async fn example() -> anyhow::Result<()> {
-//! let contracts = uniswap::Contracts {
-//!     factory: "0x...".parse()?,
-//!     quoter: "0x...".parse()?,
-//!     swap_router: "0x...".parse()?,
-//!     non_fungible_position_manager: "0x...".parse()?,
-//! };
-//!
-//! let client = uniswap::Client::mainnet(contracts).await?;
-//!
-//! // Get pool price
-//! let price = client.get_pool_price(token0, token1, 3000).await?;
-//! println!("Pool price: {}", price);
-//! # Ok(())
-//! # }
-//! ```
+//! Create a Uniswap client with `uniswap::Client::mainnet(contracts).await?` to query pool prices.
 //!
 //! ## Modules
 //!

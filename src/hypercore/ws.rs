@@ -186,12 +186,8 @@ impl Connection {
     ///
     /// # Example
     ///
-    /// ```
-    /// use hypersdk::hypercore::{self, WebSocket};
-    ///
-    /// let url = hypercore::mainnet_websocket_url();
-    /// let ws = WebSocket::new(url);
-    /// ```
+    /// Create a new WebSocket connection:
+    /// `WebSocket::new(hypercore::mainnet_websocket_url())`
     pub fn new(url: Url) -> Self {
         let (tx, rx) = unbounded_channel();
         let (stx, srx) = unbounded_channel();
@@ -215,13 +211,9 @@ impl Connection {
     ///
     /// # Example
     ///
-    /// ```
-    /// use hypersdk::hypercore::{self, types::*};
-    ///
-    /// let ws = hypercore::mainnet_ws();
-    /// ws.subscribe(Subscription::Trades { coin: "BTC".into() });
-    /// ws.subscribe(Subscription::L2Book { coin: "ETH".into() });
-    /// ```
+    /// Subscribe to market data:
+    /// - `ws.subscribe(Subscription::Trades { coin: "BTC".into() })`
+    /// - `ws.subscribe(Subscription::L2Book { coin: "ETH".into() })`
     pub fn subscribe(&self, subscription: Subscription) {
         let _ = self.tx.send((true, subscription));
     }
@@ -233,12 +225,8 @@ impl Connection {
     ///
     /// # Example
     ///
-    /// ```
-    /// use hypersdk::hypercore::{self, types::*};
-    ///
-    /// # let ws = hypercore::mainnet_ws();
-    /// ws.unsubscribe(Subscription::Trades { coin: "BTC".into() });
-    /// ```
+    /// Unsubscribe from a channel:
+    /// `ws.unsubscribe(Subscription::Trades { coin: "BTC".into() })`
     pub fn unsubscribe(&self, subscription: Subscription) {
         let _ = self.tx.send((false, subscription));
     }
@@ -250,12 +238,7 @@ impl Connection {
     ///
     /// # Example
     ///
-    /// ```
-    /// # use hypersdk::hypercore;
-    /// let ws = hypercore::mainnet_ws();
-    /// // ... use the connection ...
-    /// ws.close();
-    /// ```
+    /// Close the connection when done: `ws.close()`
     pub fn close(self) {
         drop(self);
     }

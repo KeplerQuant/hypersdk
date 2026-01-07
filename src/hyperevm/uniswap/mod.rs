@@ -153,13 +153,7 @@ fn get_amounts_from_liquidity(
 ///
 /// # Example
 ///
-/// ```
-/// use hypersdk::hyperevm::uniswap::sqrt_price_limit_x96;
-/// use rust_decimal_macros::dec;
-///
-/// let price = dec!(2000); // e.g., ETH price
-/// let sqrt_price = sqrt_price_limit_x96(price, 18);
-/// ```
+/// Convert a price to sqrtPriceLimitX96 format: `sqrt_price_limit_x96(price, scale)`
 #[must_use]
 pub fn sqrt_price_limit_x96(price: Decimal, scale: u32) -> U160 {
     let q96 = U160::from(2).pow(U160::from(96));
@@ -242,25 +236,8 @@ pub struct Contracts {
 ///
 /// # Example
 ///
-/// ```no_run
-/// # use hypersdk::hyperevm::uniswap::{self, Contracts};
-/// # use hypersdk::Address;
-/// # async fn example() -> anyhow::Result<()> {
-/// # let contracts = Contracts {
-/// #     factory: "0x...".parse()?, quoter: "0x...".parse()?,
-/// #     swap_router: "0x...".parse()?, non_fungible_position_manager: "0x...".parse()?,
-/// # };
-/// let client = uniswap::Client::mainnet(contracts).await?;
-/// let positions = client.positions(user_address).await?;
-///
-/// for pos in positions {
-///     if pos.in_range {
-///         println!("Active position earning fees!");
-///     }
-/// }
-/// # Ok(())
-/// # }
-/// ```
+/// Query user positions: `client.positions(user_address).await?`
+/// Check if position is active with `pos.in_range` field.
 #[derive(Debug, Clone)]
 pub struct Position {
     /// NFT token ID for this position

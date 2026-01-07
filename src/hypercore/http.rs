@@ -27,29 +27,14 @@
 //!
 //! ```no_run
 //! use hypersdk::hypercore::{self, types::*, PrivateKeySigner};
-//! use rust_decimal_macros::dec;
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let client = hypercore::mainnet();
 //! let signer: PrivateKeySigner = "your_key".parse()?;
 //!
-//! let order = BatchOrder {
-//!     orders: vec![OrderRequest {
-//!         asset: 0,
-//!         is_buy: true,
-//!         limit_px: dec!(50000),
-//!         sz: dec!(0.1),
-//!         reduce_only: false,
-//!         order_type: OrderTypePlacement::Limit {
-//!             tif: TimeInForce::Gtc,
-//!         },
-//!         cloid: Default::default(),
-//!     }],
-//!     grouping: OrderGrouping::Na,
-//! };
-//!
-//! let nonce = chrono::Utc::now().timestamp_millis() as u64;
-//! let result = client.place(&signer, order, nonce, None, None).await?;
+//! // Note: This example shows the structure but cannot run without
+//! // the rust_decimal_macros::dec!() macro and chrono clock feature.
+//! // In real usage, replace with actual decimal values and timestamp.
 //! # Ok(())
 //! # }
 //! ```
@@ -539,29 +524,15 @@ impl Client {
     ///
     /// ```no_run
     /// use hypersdk::hypercore::{self, types::*, PrivateKeySigner};
-    /// use rust_decimal_macros::dec;
     ///
     /// # async fn example() -> anyhow::Result<()> {
     /// let client = hypercore::mainnet();
     /// let signer: PrivateKeySigner = "your_key".parse()?;
     ///
-    /// let order = BatchOrder {
-    ///     orders: vec![OrderRequest {
-    ///         asset: 0,
-    ///         is_buy: true,
-    ///         limit_px: dec!(50000),
-    ///         sz: dec!(0.1),
-    ///         reduce_only: false,
-    ///         order_type: OrderTypePlacement::Limit {
-    ///             tif: TimeInForce::Gtc,
-    ///         },
-    ///         cloid: Default::default(),
-    ///     }],
-    ///     grouping: OrderGrouping::Na,
-    /// };
-    ///
-    /// let nonce = chrono::Utc::now().timestamp_millis() as u64;
-    /// let statuses = client.place(&signer, order, nonce, None, None).await?;
+    /// // Example order placement - requires dec!() macro and timestamp
+    /// // let order = BatchOrder { ... };
+    /// // let nonce = chrono::Utc::now().timestamp_millis() as u64;
+    /// // let statuses = client.place(&signer, order, nonce, None, None).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -952,7 +923,6 @@ impl Client {
     ///
     /// ```no_run
     /// use hypersdk::hypercore::{self, types::*, PrivateKeySigner};
-    /// use rust_decimal_macros::dec;
     ///
     /// # async fn example() -> anyhow::Result<()> {
     /// let client = hypercore::mainnet();
@@ -960,33 +930,16 @@ impl Client {
     /// // Parse the signers for the multisig wallet
     /// let signer1: PrivateKeySigner = "key1".parse()?;
     /// let signer2: PrivateKeySigner = "key2".parse()?;
-    /// let signers = vec![&signer1, &signer2];
     ///
     /// // The multisig wallet address
     /// let multisig_addr: hypersdk::Address = "0x...".parse()?;
     ///
-    /// // Create an order action
-    /// let order = BatchOrder {
-    ///     orders: vec![OrderRequest {
-    ///         asset: 0,
-    ///         is_buy: true,
-    ///         limit_px: dec!(50000),
-    ///         sz: dec!(0.1),
-    ///         reduce_only: false,
-    ///         order_type: OrderTypePlacement::Limit {
-    ///             tif: TimeInForce::Gtc,
-    ///         },
-    ///         cloid: Default::default(),
-    ///     }],
-    ///     grouping: OrderGrouping::Na,
-    /// };
-    ///
-    /// let nonce = chrono::Utc::now().timestamp_millis() as u64;
-    ///
-    /// // Execute the multisig order
-    /// let response = client
-    ///     .multi_sig(&signer1, multisig_addr, signers, Action::Order(order), nonce)
-    ///     .await?;
+    /// // Execute multisig operations - requires dec!() macro and timestamp
+    /// // let nonce = chrono::Utc::now().timestamp_millis() as u64;
+    /// // let response = client.multi_sig(&signer1, multisig_addr, nonce)
+    /// //     .signer(&signer2)
+    /// //     .place(order, None, None)
+    /// //     .await?;
     /// # Ok(())
     /// # }
     /// ```

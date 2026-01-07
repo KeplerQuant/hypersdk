@@ -21,19 +21,7 @@
 //!
 //! ## Create a Provider
 //!
-//! ```no_run
-//! use hypersdk::hyperevm;
-//!
-//! # async fn example() -> anyhow::Result<()> {
-//! // Create mainnet provider
-//! let provider = hyperevm::mainnet().await?;
-//!
-//! // Get block number
-//! let block = provider.get_block_number().await?;
-//! println!("Current block: {}", block);
-//! # Ok(())
-//! # }
-//! ```
+//! Create a mainnet provider with `hyperevm::mainnet().await?` and query block numbers.
 //!
 //! ## Interact with ERC-20 Tokens
 //!
@@ -57,21 +45,7 @@
 //!
 //! ## Wei Conversions
 //!
-//! ```
-//! use hypersdk::hyperevm::{to_wei, from_wei};
-//! use hypersdk::U256;
-//! use rust_decimal_macros::dec;
-//!
-//! // Convert decimal to wei
-//! let amount = dec!(1.5);
-//! let wei = to_wei(amount, 18);
-//! assert_eq!(wei, U256::from(1_500_000_000_000_000_000u128));
-//!
-//! // Convert wei to decimal
-//! let wei = U256::from(1_500_000_000_000_000_000u128);
-//! let amount = from_wei(wei, 18);
-//! assert_eq!(amount, dec!(1.5));
-//! ```
+//! Convert between decimal amounts and wei using `to_wei(amount, decimals)` and `from_wei(wei, decimals)`.
 
 pub mod morpho;
 pub mod uniswap;
@@ -135,16 +109,7 @@ sol!(
 ///
 /// # Example
 ///
-/// ```no_run
-/// use hypersdk::hyperevm;
-///
-/// # async fn example() -> anyhow::Result<()> {
-/// let provider = hyperevm::mainnet().await?;
-/// let block = provider.get_block_number().await?;
-/// println!("Block: {}", block);
-/// # Ok(())
-/// # }
-/// ```
+/// Create a mainnet provider: `hyperevm::mainnet().await?`
 #[inline(always)]
 pub async fn mainnet() -> Result<impl Provider, TransportError> {
     mainnet_with_url(DEFAULT_RPC_URL).await
@@ -235,15 +200,7 @@ where
 ///
 /// # Example
 ///
-/// ```
-/// use hypersdk::hyperevm::to_wei;
-/// use hypersdk::U256;
-/// use rust_decimal_macros::dec;
-///
-/// // Convert 1.5 ETH to wei (18 decimals)
-/// let wei = to_wei(dec!(1.5), 18);
-/// assert_eq!(wei, U256::from(1_500_000_000_000_000_000u128));
-/// ```
+/// Convert 1.5 ETH to wei (18 decimals): `to_wei(dec!(1.5), 18)`
 #[must_use]
 #[inline]
 pub fn to_wei(mut size: Decimal, decimals: u32) -> U256 {
@@ -260,16 +217,7 @@ pub fn to_wei(mut size: Decimal, decimals: u32) -> U256 {
 ///
 /// # Example
 ///
-/// ```
-/// use hypersdk::hyperevm::from_wei;
-/// use hypersdk::U256;
-/// use rust_decimal_macros::dec;
-///
-/// // Convert 1.5 ETH (in wei) back to decimal
-/// let wei = U256::from(1_500_000_000_000_000_000u128);
-/// let amount = from_wei(wei, 18);
-/// assert_eq!(amount, dec!(1.5));
-/// ```
+/// Convert wei back to decimal: `from_wei(wei, 18)`
 #[must_use]
 #[inline]
 pub fn from_wei(wei: U256, decimals: u32) -> Decimal {

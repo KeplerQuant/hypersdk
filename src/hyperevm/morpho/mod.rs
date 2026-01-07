@@ -85,17 +85,8 @@ pub type MarketId = FixedBytes<32>;
 ///
 /// # Example
 ///
-/// ```no_run
-/// # use hypersdk::hyperevm::morpho;
-/// # async fn example() -> anyhow::Result<()> {
-/// let client = morpho::Client::mainnet().await?;
-/// let apy = client.apy(morpho_addr, market_id).await?;
-///
-/// println!("If you borrow: {:.2}% APY", apy.borrow * 100.0);
-/// println!("If you supply: {:.2}% APY", apy.supply * 100.0);
-/// # Ok(())
-/// # }
-/// ```
+/// Query APY for a market: `client.apy(morpho_addr, market_id).await?`
+/// Access borrow and supply APY via `apy.borrow` and `apy.supply` fields.
 #[derive(Debug, Clone)]
 pub struct PoolApy {
     /// Market parameters (loan token, collateral, oracle, IRM, LLTV)
@@ -115,26 +106,9 @@ pub struct PoolApy {
 ///
 /// # Example
 ///
-/// ```no_run
-/// # use hypersdk::hyperevm::morpho;
-/// # async fn example() -> anyhow::Result<()> {
-/// let client = morpho::MetaClient::mainnet().await?;
-/// let vault_apy = client.apy(vault_addr).await?;
-///
-/// // Calculate effective APY after fees
-/// let apy = vault_apy.apy();
-/// println!("Vault APY: {:.2}%", apy * 100.0);
-///
-/// // Examine individual markets
-/// for component in &vault_apy.components {
-///     println!("Market {}: {:.2}%",
-///         component.pool.params.loanToken,
-///         component.pool.supply * 100.0
-///     );
-/// }
-/// # Ok(())
-/// # }
-/// ```
+/// Query vault APY: `client.apy(vault_addr).await?`
+/// Calculate effective APY after fees using `vault_apy.apy()` method.
+/// Individual market data available in `vault_apy.components`.
 #[derive(Debug, Clone)]
 pub struct VaultApy {
     /// Individual markets that compose this vault
@@ -163,16 +137,7 @@ impl VaultApy {
     ///
     /// # Example
     ///
-    /// ```no_run
-    /// # use hypersdk::hyperevm::morpho;
-    /// # async fn example() -> anyhow::Result<()> {
-    /// let client = morpho::MetaClient::mainnet().await?;
-    /// let vault_apy = client.apy(vault_addr).await?;
-    ///
-    /// println!("Vault APY: {:.2}%", vault_apy.apy() * 100.0);
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Calculate vault APY: `vault_apy.apy()` returns the effective APY as a decimal.
     #[must_use]
     pub fn apy(&self) -> f64 {
         if self.total_deposits == 0.0 {

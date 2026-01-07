@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::hypercore::{
-    Chain, MAINNET_MULTISIG_CHAIN_ID,
+    ARBITRUM_TESTNET_CHAIN_ID, Chain,
     types::{
         Action, ActionRequest, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder,
         CORE_MAINNET_EIP712_DOMAIN, MultiSigAction, MultiSigPayload, ScheduleCancel, SendAsset,
@@ -297,7 +297,8 @@ pub(super) trait Signable: Serialize + TypedDataProvider {
         lead: Address,
         chain: Chain,
     ) -> anyhow::Result<Signature> {
-        if let Some(typed_data) = self.typed_data_multisig(multi_sig_user, lead) {
+        if let Some(mut typed_data) = self.typed_data_multisig(multi_sig_user, lead) {
+            typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
             let signature = signer.sign_dynamic_typed_data_sync(&typed_data)?;
             Ok(signature.into())
         } else {
@@ -564,6 +565,7 @@ pub(super) fn multisig_lead_msg<S: SignerSync>(
 ) -> Result<ActionRequest> {
     let expires_after = maybe_expires_after.map(|after| after.timestamp_millis() as u64);
     let multsig_hash = rmp_hash(&action, nonce, maybe_vault_address, expires_after)?;
+    // println!("multi {}", multsig_hash);
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -579,15 +581,14 @@ pub(super) fn multisig_lead_msg<S: SignerSync>(
         nonce,
     };
 
-    // Always use the mainnet multisig domain (chainId 0x66eee) for both mainnet and testnet
-    // The hyperliquidChain field in the message distinguishes between mainnet and testnet
     let mut typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, None);
     typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
 
-    let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?;
+    let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?.into();
+    // println!("lead: {sig:?}");
 
     Ok(ActionRequest {
-        signature: sig.into(),
+        signature: sig,
         action: Action::MultiSig(action),
         nonce,
         vault_address: maybe_vault_address,
@@ -643,11 +644,12 @@ pub(super) fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
         let sig = inner_action
             .multi_sig_single(signer, nonce, multi_sig_user, lead, chain)
             .with_context(|| format!("signing using {}", signer.address()))?;
+        // println!("sig: {sig:?}");
         signatures.push(sig);
     }
 
     Ok(MultiSigAction {
-        signature_chain_id: MAINNET_MULTISIG_CHAIN_ID,
+        signature_chain_id: ARBITRUM_TESTNET_CHAIN_ID,
         signatures,
         payload: MultiSigPayload {
             multi_sig_user: multi_sig_user.to_string().to_lowercase(),
@@ -664,7 +666,7 @@ mod tests {
 
     use super::*;
     use crate::hypercore::{
-        ARBITRUM_SIGNATURE_CHAIN_ID,
+        ARBITRUM_MAINNET_CHAIN_ID,
         types::{self},
     };
 
@@ -678,7 +680,7 @@ mod tests {
         let signer = get_signer();
 
         let usd_send = types::UsdSend {
-            signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
+            signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID,
             hyperliquid_chain: Chain::Mainnet,
             destination: "0x0D1d9635D0640821d15e323ac8AdADfA9c111414"
                 .parse()

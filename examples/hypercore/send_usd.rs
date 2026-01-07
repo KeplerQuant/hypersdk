@@ -6,10 +6,7 @@ use std::{
 use clap::Parser;
 use hypersdk::{
     Address,
-    hypercore::{
-        self as hypercore, ARBITRUM_SIGNATURE_CHAIN_ID,
-        types::{Chain, UsdSend},
-    },
+    hypercore::{self as hypercore, ARBITRUM_TESTNET_CHAIN_ID, Chain, types::UsdSend},
 };
 use rust_decimal::Decimal;
 
@@ -36,6 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = hypercore::mainnet();
     let signer = hypercore::PrivateKeySigner::from_str(&args.private_key)?;
 
+    println!("From {} to {}", signer.address(), args.to);
+
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -44,9 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .send_usdc(
             &signer,
             UsdSend {
-                hyperliquid_chain: Chain::Mainnet,
-                signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
-                destination: signer.address(),
+                hyperliquid_chain: Chain::Testnet,
+                signature_chain_id: ARBITRUM_TESTNET_CHAIN_ID,
+                destination: args.to,
                 amount: args.amount,
                 time: nonce,
             },

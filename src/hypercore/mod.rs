@@ -171,30 +171,116 @@ pub enum Chain {
     Testnet,
 }
 
-/// Arbitrum mainnet chain ID used for EIP-712 signatures.
-///
-/// This is required when signing transactions that involve cross-chain operations
-/// or transfers between HyperCore and HyperEVM.
-///
-/// Value: `0xa4b1` (Arbitrum One mainnet)
-pub const ARBITRUM_SIGNATURE_CHAIN_ID: &str = "0xa4b1";
+impl Chain {
+    /// Returns the Arbitrum chain ID for EIP-712 signatures based on the chain.
+    ///
+    /// This method returns the appropriate Arbitrum chain ID to use in EIP-712 signature
+    /// domains for actions like USDC transfers, spot sends, and asset transfers.
+    ///
+    /// # Returns
+    ///
+    /// - Mainnet: `"0xa4b1"` (Arbitrum One mainnet chain ID)
+    /// - Testnet: `"0x66eee"` (Hyperliquid testnet chain ID)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use hypersdk::hypercore::Chain;
+    ///
+    /// let mainnet = Chain::Mainnet;
+    /// assert_eq!(mainnet.arbitrum_id(), "0xa4b1");
+    ///
+    /// let testnet = Chain::Testnet;
+    /// assert_eq!(testnet.arbitrum_id(), "0x66eee");
+    /// ```
+    pub fn arbitrum_id(&self) -> &'static str {
+        if self.is_mainnet() {
+            ARBITRUM_MAINNET_CHAIN_ID
+        } else {
+            ARBITRUM_TESTNET_CHAIN_ID
+        }
+    }
+}
 
-/// Mainnet L1 multisig signature chain ID.
+/// Arbitrum One mainnet chain ID for EIP-712 signatures.
 ///
-/// This chain ID is used when constructing EIP-712 signatures for multisig operations
-/// on Hyperliquid mainnet. Unlike regular L1 actions which use the Arbitrum chain ID,
-/// multisig operations use Hyperliquid's custom chain ID.
+/// This chain ID is used in EIP-712 signature domains for cross-chain operations
+/// involving Arbitrum, such as:
+/// - USDC transfers between HyperCore and Arbitrum
+/// - Spot token transfers
+/// - Asset transfers to/from HyperEVM
 ///
-/// # Important
+/// # Value
 ///
-/// This same chain ID (0x66eee) is used in the EIP-712 domain for BOTH mainnet and testnet
-/// multisig operations. The actual chain (mainnet vs testnet) is distinguished by the
-/// `hyperliquidChain` field in the message payload, not by the domain chain ID.
+/// `0xa4b1` - The standard Arbitrum One mainnet chain ID (decimal: 42161)
 ///
-/// Value: `0x66eee` (421614 in decimal)
+/// # Usage
 ///
-/// See: [`TESTNET_MULTISIG_CHAIN_ID`]
-pub const MAINNET_MULTISIG_CHAIN_ID: &str = "0x66eee";
+/// This constant should be used as the `signature_chain_id` field when creating
+/// actions like `UsdSend`, `SpotSend`, or `SendAsset` on mainnet.
+///
+/// # Example
+///
+/// ```rust
+/// use hypersdk::hypercore::{ARBITRUM_MAINNET_CHAIN_ID, types::UsdSend, Chain};
+/// use rust_decimal::dec;
+///
+/// let usd_send = UsdSend {
+///     hyperliquid_chain: Chain::Mainnet,
+///     signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID,
+///     destination: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb".parse().unwrap(),
+///     amount: dec!(100),
+///     time: 1234567890,
+/// };
+/// ```
+///
+/// # See Also
+///
+/// - [`ARBITRUM_TESTNET_CHAIN_ID`]: For testnet operations
+/// - [`Chain::arbitrum_id()`]: Helper method to get the correct ID based on chain
+pub const ARBITRUM_MAINNET_CHAIN_ID: &str = "0xa4b1";
+
+/// Hyperliquid testnet chain ID for EIP-712 signatures.
+///
+/// This chain ID is used in EIP-712 signature domains for testnet operations
+/// involving asset transfers and cross-chain operations on Hyperliquid testnet.
+///
+/// # Value
+///
+/// `0x66eee` - The Hyperliquid testnet chain ID (decimal: 421614)
+///
+/// # Important Notes
+///
+/// - This is **not** the Arbitrum testnet chain ID
+/// - This is Hyperliquid's custom chain ID for testnet operations
+/// - Also used as [`MAINNET_MULTISIG_CHAIN_ID`] for multisig operations on both mainnet and testnet
+///
+/// # Usage
+///
+/// This constant should be used as the `signature_chain_id` field when creating
+/// actions like `UsdSend`, `SpotSend`, or `SendAsset` on testnet.
+///
+/// # Example
+///
+/// ```rust
+/// use hypersdk::hypercore::{ARBITRUM_TESTNET_CHAIN_ID, types::UsdSend, Chain};
+/// use rust_decimal::dec;
+///
+/// let usd_send = UsdSend {
+///     hyperliquid_chain: Chain::Testnet,
+///     signature_chain_id: ARBITRUM_TESTNET_CHAIN_ID,
+///     destination: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb".parse().unwrap(),
+///     amount: dec!(10),
+///     time: 1234567890,
+/// };
+/// ```
+///
+/// # See Also
+///
+/// - [`ARBITRUM_MAINNET_CHAIN_ID`]: For mainnet operations
+/// - [`MAINNET_MULTISIG_CHAIN_ID`]: Same value, used for multisig operations
+/// - [`Chain::arbitrum_id()`]: Helper method to get the correct ID based on chain
+pub const ARBITRUM_TESTNET_CHAIN_ID: &str = "0x66eee";
 
 /// USDC contract address on HyperEVM.
 ///

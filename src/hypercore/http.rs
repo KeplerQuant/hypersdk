@@ -72,7 +72,7 @@ use url::Url;
 
 use super::signing::*;
 use crate::hypercore::{
-    ARBITRUM_SIGNATURE_CHAIN_ID, Chain, Cloid, OidOrCloid, PerpMarket, SpotMarket, SpotToken,
+    ARBITRUM_MAINNET_CHAIN_ID, Chain, Cloid, OidOrCloid, PerpMarket, SpotMarket, SpotToken,
     mainnet_url, testnet_url,
     types::{
         Action, ApiResponse, BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder,
@@ -705,7 +705,7 @@ impl Client {
             &signer,
             SpotSend {
                 hyperliquid_chain: Chain::Mainnet,
-                signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
+                signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID,
                 destination,
                 token: SendToken(token),
                 amount,
@@ -737,7 +737,7 @@ impl Client {
             signer,
             SendAsset {
                 hyperliquid_chain: Chain::Mainnet,
-                signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
+                signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID,
                 destination: signer.address(),
                 source_dex: "".into(),
                 destination_dex: "spot".into(),
@@ -772,7 +772,7 @@ impl Client {
             signer,
             SendAsset {
                 hyperliquid_chain: Chain::Mainnet,
-                signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
+                signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID,
                 destination: signer.address(),
                 source_dex: "spot".into(),
                 destination_dex: "".into(),
@@ -1327,6 +1327,92 @@ where
                 ApiResponse::Ok(OkResponse::Default) => Ok(()),
                 ApiResponse::Err(err) => anyhow::bail!("send_usdc: {err}"),
                 _ => anyhow::bail!("send_usdc: unexpected response type: {resp:?}"),
+            }
+        }
+    }
+
+    /// Send assets from the multisig account.
+    ///
+    /// This method collects signatures from all signers for an asset transfer using EIP-712
+    /// typed data, then submits the multisig transaction to the exchange. This can be used
+    /// to transfer assets between different destinations (accounts, DEXes, subaccounts).
+    ///
+    /// # Process
+    ///
+    /// 1. Creates EIP-712 typed data from the SendAsset action
+    /// 2. Each signer signs the typed data directly using EIP-712
+    /// 3. Collects all signatures into a `MultiSigAction`
+    /// 4. Lead signer submits the complete transaction
+    ///
+    /// # Parameters
+    ///
+    /// - `send`: The SendAsset parameters (destination, token, amount, source/dest DEX, etc.)
+    ///
+    /// # Returns
+    ///
+    /// A future that resolves to `Ok(())` on success or an error on failure.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use hypersdk::hypercore::types::{SendAsset, SendToken};
+    /// use hypersdk::hypercore::ARBITRUM_MAINNET_CHAIN_ID;
+    /// use rust_decimal::dec;
+    ///
+    /// // Get the token info first
+    /// let tokens = client.spot_meta().await?;
+    /// let usdc = tokens.iter().find(|t| t.name == "USDC").unwrap();
+    ///
+    /// let send = SendAsset {
+    ///     hyperliquid_chain: Chain::Mainnet,
+    ///     signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID,
+    ///     destination: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb".parse()?,
+    ///     source_dex: "".to_string(),      // Empty for perp balance
+    ///     destination_dex: "".to_string(), // Empty for recipient's perp balance
+    ///     token: SendToken(usdc.clone()),
+    ///     from_sub_account: "".to_string(), // Empty for main account
+    ///     amount: dec!(100),
+    ///     nonce: chrono::Utc::now().timestamp_millis() as u64,
+    /// };
+    ///
+    /// client
+    ///     .multi_sig(&lead_signer, multisig_address, nonce)
+    ///     .signers(&signers)
+    ///     .send_asset(send)
+    ///     .await?;
+    ///
+    /// println!("Successfully sent 100 USDC from multisig account");
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Uses EIP-712 typed data signatures (different from order placement which uses RMP)
+    /// - Source/destination DEX can be: "" (perp balance), "spot", or other DEX identifiers
+    /// - Token must be obtained from `spot_meta()` API call
+    /// - Nonce should be unique for each transaction (typically current timestamp in ms)
+    pub fn send_asset(&self, send: SendAsset) -> impl Future<Output = Result<()>> + Send + 'static {
+        let nonce = send.nonce;
+        let res = multisig_collect_signatures(
+            self.lead.address(),
+            self.multi_sig_user,
+            self.signers.iter().copied(),
+            Action::SendAsset(send),
+            nonce,
+            self.client.chain,
+        )
+        .map(|action| {
+            self.client
+                .sign_and_send(&self.lead, action, self.nonce, None, None)
+        });
+
+        async move {
+            let future = res?;
+            let resp = future.await?;
+
+            match resp {
+                ApiResponse::Ok(OkResponse::Default) => Ok(()),
+                ApiResponse::Err(err) => anyhow::bail!("send_asset: {err}"),
+                _ => anyhow::bail!("send_asset: unexpected response type: {resp:?}"),
             }
         }
     }

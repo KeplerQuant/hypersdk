@@ -31,6 +31,10 @@ name = "multisig_order"
 path = "examples/hypercore/multisig_order.rs"
 
 [[example]]
+name = "multisig_send_usd"
+path = "examples/hypercore/multisig_send_usd.rs"
+
+[[example]]
 name = "buy_and_transfer"
 path = "examples/hypercore/buy_and_transfer.rs"
 

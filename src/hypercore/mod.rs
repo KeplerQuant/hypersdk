@@ -144,20 +144,30 @@ pub use ws::Connection as WebSocket;
 /// Chain identifier for Hyperliquid operations.
 ///
 /// This determines which network-specific constants to use for signatures and operations.
+///
+/// # Serialization
+///
+/// Serializes to PascalCase format: "Mainnet" or "Testnet".
+/// This format is required by the Hyperliquid API.
 #[derive(
     Debug,
     Clone,
     Copy,
     PartialEq,
     Eq,
+    serde::Serialize,
+    serde::Deserialize,
     derive_more::Display,
     derive_more::FromStr,
     derive_more::IsVariant,
 )]
+#[serde(rename_all = "PascalCase")]
 pub enum Chain {
     /// Mainnet chain
+    #[display("Mainnet")]
     Mainnet,
     /// Testnet chain
+    #[display("Testnet")]
     Testnet,
 }
 

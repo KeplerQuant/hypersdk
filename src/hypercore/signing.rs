@@ -8,7 +8,7 @@ use alloy::{
     primitives::{Address, B256},
     signers::{Signer, SignerSync},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
@@ -21,12 +21,207 @@ use crate::hypercore::{
     },
 };
 
-/// Trait for signing actions.
+/// Provides EIP-712 typed data for actions that require structured data signing.
 ///
-/// This trait defines the interface for signing different types of actions
-/// on Hyperliquid. Each action type implements this trait with the appropriate
-/// signing method (RMP or EIP-712).
-pub(super) trait Signable {
+/// This trait enables actions to provide their EIP-712 typed data representation for signing.
+/// Actions that use EIP-712 typed data (like UsdSend, SpotSend, SendAsset) implement this trait
+/// to return their structured data. Actions that use RMP (MessagePack) hashing (like orders,
+/// cancels, modifications) use the default implementation which returns `None`.
+///
+/// # EIP-712 vs RMP Signing
+///
+/// Hyperliquid uses two different signing methods:
+///
+/// - **EIP-712 Typed Data**: Used for transfers and asset movements (UsdSend, SpotSend, SendAsset)
+///   - Provides human-readable structured data
+///   - Better UX in wallets that display the transaction details
+///   - Standard Ethereum signing format
+///
+/// - **RMP (MessagePack) Hashing**: Used for trading actions (orders, cancels, modifications)
+///   - More compact serialization
+///   - Faster for high-frequency operations
+///   - Hash is signed using EIP-712 Agent wrapper
+///
+/// # Implementation Notes
+///
+/// - Default implementation returns `None` (for RMP-based actions)
+/// - Actions requiring EIP-712 override `typed_data()` to return their structured data
+/// - Multisig signatures can optionally use a different typed data format via `typed_data_multisig()`
+///
+/// # Example
+///
+/// ```rust,ignore
+/// impl TypedDataProvider for UsdSend {
+///     fn typed_data(&self) -> Option<TypedData> {
+///         Some(self.typed_data(self))
+///     }
+/// }
+/// ```
+pub(super) trait TypedDataProvider {
+    /// Returns the EIP-712 typed data for single-signer transactions.
+    ///
+    /// This method returns the structured EIP-712 typed data that represents this action.
+    /// Actions using RMP hashing (orders, cancels, etc.) return `None` by default.
+    /// Actions using EIP-712 typed data (transfers, asset sends) override this to return
+    /// their structured representation.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(TypedData)`: For actions that use EIP-712 typed data signing
+    /// - `None`: For actions that use RMP hashing (default)
+    fn typed_data(&self) -> Option<TypedData> {
+        None
+    }
+
+    /// Returns the EIP-712 typed data for multisig transactions.
+    ///
+    /// This method allows actions to provide a different typed data format for multisig
+    /// transactions if needed. Most actions use the same format as single-signer transactions
+    /// (via the default implementation), but this can be overridden for special cases.
+    ///
+    /// # Parameters
+    ///
+    /// - `multi_sig_user`: The multisig account address
+    /// - `lead`: The lead signer address who will submit the transaction
+    ///
+    /// # Returns
+    ///
+    /// - `Some(TypedData)`: For actions that need custom multisig typed data
+    /// - `None`: Uses the same format as single-signer (default)
+    fn typed_data_multisig(&self, _multi_sig_user: Address, _lead: Address) -> Option<TypedData> {
+        None
+    }
+}
+
+/// Trait for signing actions that modify state on Hyperliquid.
+///
+/// This trait provides a unified interface for signing different types of actions on Hyperliquid.
+/// Each action type (orders, transfers, cancellations, etc.) implements this trait with the
+/// appropriate signing method based on whether it uses RMP (MessagePack) hashing or EIP-712
+/// typed data.
+///
+/// # Signing Methods
+///
+/// Hyperliquid uses two signing approaches:
+///
+/// ## RMP (MessagePack) Signing
+///
+/// Used for trading actions (orders, modifications, cancellations):
+/// 1. Serialize the action to MessagePack format
+/// 2. Append nonce, vault address, and expiry to the bytes
+/// 3. Hash the bytes with Keccak256
+/// 4. Sign the hash using EIP-712 with an Agent wrapper struct
+///
+/// ## EIP-712 Typed Data Signing
+///
+/// Used for asset transfers (UsdSend, SpotSend, SendAsset):
+/// 1. Create structured EIP-712 typed data from the action
+/// 2. Sign the typed data directly using EIP-712
+/// 3. More human-readable in wallet UIs
+///
+/// # Implementation Pattern
+///
+/// Actions implement this trait by calling either `sign_rmp()` or `sign_eip712()`:
+///
+/// ```rust,ignore
+/// // RMP-based action (orders, cancels, etc.)
+/// impl Signable for BatchOrder {
+///     fn sign<S: SignerSync>(
+///         self,
+///         signer: &S,
+///         nonce: u64,
+///         maybe_vault_address: Option<Address>,
+///         maybe_expires_after: Option<DateTime<Utc>>,
+///         chain: Chain,
+///     ) -> Result<ActionRequest> {
+///         sign_rmp(signer, Action::Order(self), nonce, maybe_vault_address, maybe_expires_after, chain)
+///     }
+/// }
+///
+/// // EIP-712 typed data action (transfers)
+/// impl Signable for UsdSend {
+///     fn sign<S: SignerSync>(
+///         self,
+///         signer: &S,
+///         nonce: u64,
+///         _maybe_vault_address: Option<Address>,
+///         _maybe_expires_after: Option<DateTime<Utc>>,
+///         _chain: Chain,
+///     ) -> Result<ActionRequest> {
+///         let typed_data = self.typed_data().unwrap();
+///         sign_eip712(signer, Action::UsdSend(self), typed_data, nonce)
+///     }
+/// }
+/// ```
+///
+/// # Type Parameters
+///
+/// - `S: SignerSync`: The signer type that can sign messages synchronously
+///
+/// # Required Traits
+///
+/// - `Serialize`: Actions must be serializable (for RMP hashing or typed data creation)
+/// - `TypedDataProvider`: Actions must provide typed data if applicable (or use default None)
+pub(super) trait Signable: Serialize + TypedDataProvider {
+    /// Sign this action and create a signed action request.
+    ///
+    /// This method consumes the action, signs it using the appropriate method (RMP or EIP-712),
+    /// and returns a complete `ActionRequest` that can be submitted to the exchange.
+    ///
+    /// # Parameters
+    ///
+    /// - `self`: The action to sign (consumed to avoid cloning)
+    /// - `signer`: The signer that will sign the action
+    /// - `nonce`: Unique transaction nonce (typically millisecond timestamp)
+    /// - `maybe_vault_address`: Optional vault address if trading on behalf of a vault
+    /// - `maybe_expires_after`: Optional expiration time for the request
+    /// - `chain`: The chain (mainnet or testnet)
+    ///
+    /// # Returns
+    ///
+    /// Returns an `ActionRequest` containing:
+    /// - The signed action
+    /// - The signature (r, s, v)
+    /// - The nonce
+    /// - Optional vault address
+    /// - Optional expiration timestamp
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Serialization fails (for RMP-based actions)
+    /// - Signing fails (invalid signer or signature generation error)
+    /// - Typed data creation fails (for EIP-712 actions)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use hypersdk::hypercore::types::BatchOrder;
+    /// use hypersdk::hypercore::signing::Signable;
+    /// use alloy::signers::local::PrivateKeySigner;
+    ///
+    /// let signer: PrivateKeySigner = "0x...".parse()?;
+    /// let order = BatchOrder { /* ... */ };
+    /// let nonce = chrono::Utc::now().timestamp_millis() as u64;
+    ///
+    /// // Sign the order
+    /// let action_request = order.sign(
+    ///     &signer,
+    ///     nonce,
+    ///     None,  // No vault
+    ///     None,  // No expiry
+    ///     Chain::Mainnet,
+    /// )?;
+    ///
+    /// // action_request can now be submitted to the exchange
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Nonce must be unique for each transaction (typically use current timestamp in ms)
+    /// - Vault address is only needed when trading on behalf of a vault
+    /// - Expiration is optional but recommended for time-sensitive operations
+    /// - The action is consumed (moved) to avoid unnecessary cloning
     fn sign<S: SignerSync>(
         self,
         signer: &S,
@@ -35,6 +230,84 @@ pub(super) trait Signable {
         maybe_expires_after: Option<DateTime<Utc>>,
         chain: Chain,
     ) -> anyhow::Result<ActionRequest>;
+
+    /// Sign this action as part of a multisig transaction (single signer's signature).
+    ///
+    /// This method generates a single signature for use in a multisig transaction. It should
+    /// be called once per signer participating in the multisig. The signatures are then collected
+    /// and combined into a `MultiSigAction`.
+    ///
+    /// # Process
+    ///
+    /// For EIP-712 typed data actions (transfers):
+    /// 1. Gets typed data via `typed_data_multisig()`
+    /// 2. Signs the typed data directly
+    ///
+    /// For RMP-based actions (orders, cancels):
+    /// 1. Creates an RMP hash of `(multisig_user, lead, action, nonce)`
+    /// 2. Signs the hash using EIP-712 Agent wrapper
+    ///
+    /// # Parameters
+    ///
+    /// - `self`: Reference to the action (not consumed, as multiple signers need to sign)
+    /// - `signer`: The signer creating this signature
+    /// - `nonce`: Transaction nonce (must be same for all signers)
+    /// - `multi_sig_user`: The multisig account address
+    /// - `lead`: The lead signer who will submit the transaction
+    /// - `chain`: The chain (mainnet or testnet)
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Signature` (r, s, v) from this signer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Serialization fails (for RMP-based actions)
+    /// - Signing fails (invalid signer or signature generation error)
+    /// - Typed data creation fails (for EIP-712 actions)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use hypersdk::hypercore::types::BatchOrder;
+    /// use hypersdk::hypercore::signing::Signable;
+    ///
+    /// let order = BatchOrder { /* ... */ };
+    /// let nonce = chrono::Utc::now().timestamp_millis() as u64;
+    ///
+    /// // Each signer creates their signature
+    /// let sig1 = order.multi_sig_single(&signer1, nonce, multisig_addr, lead_addr, chain)?;
+    /// let sig2 = order.multi_sig_single(&signer2, nonce, multisig_addr, lead_addr, chain)?;
+    /// let sig3 = order.multi_sig_single(&signer3, nonce, multisig_addr, lead_addr, chain)?;
+    ///
+    /// // Signatures are collected into a MultiSigAction (see multisig_collect_* functions)
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - All signers must use the same nonce
+    /// - Addresses are normalized to lowercase for consistent hashing
+    /// - Don't call this directly; use the multisig collection functions instead
+    fn multi_sig_single<S: SignerSync>(
+        &self,
+        signer: &S,
+        nonce: u64,
+        multi_sig_user: Address,
+        lead: Address,
+        chain: Chain,
+    ) -> anyhow::Result<Signature> {
+        if let Some(typed_data) = self.typed_data_multisig(multi_sig_user, lead) {
+            let signature = signer.sign_dynamic_typed_data_sync(&typed_data)?;
+            Ok(signature.into())
+        } else {
+            let multi_sig_user = multi_sig_user.to_string().to_lowercase();
+            let lead = lead.to_string().to_lowercase();
+            let connection_id = rmp_hash(&(&multi_sig_user, &lead, self), nonce, None, None)?;
+            let signature = sign_l1_action(signer, chain, connection_id)?;
+            Ok(signature)
+        }
+    }
 }
 
 // Implement Signable for actions that use sign_rmp (MessagePack hashing)
@@ -148,7 +421,7 @@ impl Signable for UsdSend {
         _maybe_expires_after: Option<DateTime<Utc>>,
         _chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = self.typed_data();
+        let typed_data = self.typed_data().expect("typed_data");
         sign_eip712(signer, Action::UsdSend(self), typed_data, nonce)
     }
 }
@@ -162,7 +435,7 @@ impl Signable for SendAsset {
         _maybe_expires_after: Option<DateTime<Utc>>,
         _chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = self.typed_data();
+        let typed_data = self.typed_data().expect("typed_data");
         sign_eip712(signer, Action::SendAsset(self), typed_data, nonce)
     }
 }
@@ -176,7 +449,7 @@ impl Signable for SpotSend {
         _maybe_expires_after: Option<DateTime<Utc>>,
         _chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = self.typed_data();
+        let typed_data = self.typed_data().expect("typed_data");
         sign_eip712(signer, Action::SpotSend(self), typed_data, nonce)
     }
 }
@@ -308,7 +581,7 @@ pub(super) fn multisig_lead_msg<S: SignerSync>(
 
     // Always use the mainnet multisig domain (chainId 0x66eee) for both mainnet and testnet
     // The hyperliquidChain field in the message distinguishes between mainnet and testnet
-    let mut typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope);
+    let mut typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, None);
     typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
 
     let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?;
@@ -354,7 +627,7 @@ pub(super) fn multisig_lead_msg<S: SignerSync>(
 /// # Reference
 ///
 /// Based on: https://github.com/hyperliquid-dex/hyperliquid-python-sdk/blob/be7523d58297a93d0e938063460c14ae45e9034f/hyperliquid/utils/signing.py#L293
-pub(super) fn multisig_collect_rmp_signatures<'a, S: SignerSync + Signer + 'a>(
+pub(super) fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
     lead: Address,
     multi_sig_user: Address,
     signers: impl Iterator<Item = &'a S>,
@@ -365,17 +638,11 @@ pub(super) fn multisig_collect_rmp_signatures<'a, S: SignerSync + Signer + 'a>(
     // Collect signatures from all signers
     let mut signatures = vec![];
 
-    // Normalize addresses to lowercase for consistent hashing
-    let lead = lead.to_string().to_lowercase();
-    let multi_sig_user = multi_sig_user.to_string().to_lowercase();
-
-    // Hash the envelope: [multi_sig_user (lowercase), outer_signer (lowercase), action]
-    // This hash is what each signer will sign with their private key
-    let action_hash = rmp_hash(&(&multi_sig_user, &lead, &inner_action), nonce, None, None)?;
-
     // Collect a signature from each signer for the action hash
     for signer in signers {
-        let sig = sign_l1_action(signer, chain, action_hash)?;
+        let sig = inner_action
+            .multi_sig_single(signer, nonce, multi_sig_user, lead, chain)
+            .with_context(|| format!("signing using {}", signer.address()))?;
         signatures.push(sig);
     }
 
@@ -383,93 +650,8 @@ pub(super) fn multisig_collect_rmp_signatures<'a, S: SignerSync + Signer + 'a>(
         signature_chain_id: MAINNET_MULTISIG_CHAIN_ID,
         signatures,
         payload: MultiSigPayload {
-            multi_sig_user,
-            outer_signer: lead,
-            action: Box::new(inner_action),
-        },
-    })
-}
-
-/// Collects signatures from all signers for a multisig action using EIP-712 typed data.
-///
-/// This function implements the Hyperliquid multisig signature collection protocol for actions
-/// that use EIP-712 typed data (UsdSend, SpotSend, SendAsset, etc).
-///
-/// # Process
-///
-/// 1. Creates typed data from the inner action (e.g., UsdSend, SpotSend)
-/// 2. Each signer signs the typed data directly using EIP-712
-/// 3. All signatures are collected and packaged into a `MultiSigAction`
-///
-/// # Address Normalization
-///
-/// Both the multisig user address and lead signer address are normalized to lowercase
-/// for consistency with the RMP signature collection method.
-///
-/// # Parameters
-///
-/// - `lead`: The lead signer who will submit the transaction
-/// - `multi_sig_user`: The multisig account address
-/// - `signers`: Iterator of signers who will sign the action
-/// - `inner_action`: The action to be signed (UsdSend, SpotSend, SendAsset)
-/// - `typed_data`: The EIP-712 typed data structure for the action
-///
-/// # Returns
-///
-/// A `MultiSigAction` containing all collected signatures and the action payload.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use hypersdk::hypercore::types::{UsdSend, HyperliquidChain};
-/// use hypersdk::hypercore::signing::multisig_collect_typed_data_signatures;
-/// use rust_decimal::Decimal;
-///
-/// let usd_send = UsdSend {
-///     hyperliquid_chain: HyperliquidChain::Mainnet,
-///     signature_chain_id: "0xa4b1",
-///     destination: "0x...".parse()?,
-///     amount: Decimal::from(100),
-///     time: 1234567890,
-/// };
-///
-/// let typed_data = usd_send.typed_data(&usd_send);
-/// let action = Action::UsdSend(usd_send);
-///
-/// let multisig_action = multisig_collect_typed_data_signatures(
-///     lead_address,
-///     multisig_address,
-///     signers.iter(),
-///     action,
-///     typed_data,
-/// )?;
-/// ```
-pub(super) fn multisig_collect_typed_data_signatures<'a, S: SignerSync + Signer + 'a>(
-    lead: Address,
-    multi_sig_user: Address,
-    signers: impl Iterator<Item = &'a S>,
-    inner_action: Action,
-    typed_data: TypedData,
-) -> Result<MultiSigAction> {
-    // Collect signatures from all signers
-    let mut signatures = vec![];
-
-    // Normalize addresses to lowercase for consistency
-    let lead = lead.to_string().to_lowercase();
-    let multi_sig_user = multi_sig_user.to_string().to_lowercase();
-
-    // Each signer signs the typed data directly
-    for signer in signers {
-        let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?;
-        signatures.push(sig.into());
-    }
-
-    Ok(MultiSigAction {
-        signature_chain_id: MAINNET_MULTISIG_CHAIN_ID,
-        signatures,
-        payload: MultiSigPayload {
-            multi_sig_user,
-            outer_signer: lead,
+            multi_sig_user: multi_sig_user.to_string().to_lowercase(),
+            outer_signer: lead.to_string().to_lowercase(),
             action: Box::new(inner_action),
         },
     })
@@ -483,7 +665,7 @@ mod tests {
     use super::*;
     use crate::hypercore::{
         ARBITRUM_SIGNATURE_CHAIN_ID,
-        types::{self, HyperliquidChain},
+        types::{self},
     };
 
     fn get_signer() -> PrivateKeySigner {
@@ -497,14 +679,14 @@ mod tests {
 
         let usd_send = types::UsdSend {
             signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
-            hyperliquid_chain: HyperliquidChain::Mainnet,
+            hyperliquid_chain: Chain::Mainnet,
             destination: "0x0D1d9635D0640821d15e323ac8AdADfA9c111414"
                 .parse()
                 .unwrap(),
             amount: rust_decimal::Decimal::ONE,
             time: 1690393044548,
         };
-        let typed_data = usd_send.typed_data();
+        let typed_data = usd_send.typed_data().unwrap();
         let signature = signer.sign_dynamic_typed_data_sync(&typed_data).unwrap();
 
         let expected_sig = "0xeca6267bcaadc4c0ae1aed73f5a2c45fcdbb7271f2e9356992404e5d4bad75a3572e08fe93f17755abadb7f84be7d1e9c4ce48bb5633e339bc430c672d5a20ed1b";

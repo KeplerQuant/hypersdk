@@ -76,7 +76,7 @@ use std::{collections::HashMap, fmt};
 
 use crate::hypercore::{
     Chain,
-    signing::{Signable, sign_rmp},
+    signing::{Signable, TypedDataProvider, sign_rmp},
 };
 use alloy::{
     dyn_abi::{Eip712Domain, Eip712Types, Resolver, TypedData},
@@ -1464,7 +1464,7 @@ impl fmt::Display for SendToken {
 #[serde(rename_all = "camelCase")]
 pub struct UsdSend {
     /// The chain this action is being executed on.
-    pub hyperliquid_chain: HyperliquidChain,
+    pub hyperliquid_chain: Chain,
     /// Signature chain ID.
     ///
     /// For arbitrum use [`super::ARBITRUM_SIGNATURE_CHAIN_ID`].
@@ -1478,13 +1478,6 @@ pub struct UsdSend {
     pub time: u64,
 }
 
-impl UsdSend {
-    #[inline(always)]
-    pub(super) fn typed_data(&self) -> TypedData {
-        get_typed_data::<solidity::UsdSend>(self)
-    }
-}
-
 /// Send spot tokens.
 ///
 /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#core-spot-transfer>
@@ -1493,7 +1486,7 @@ impl UsdSend {
 #[serde(rename_all = "camelCase")]
 pub struct SpotSend {
     /// The chain this action is being executed on.
-    pub hyperliquid_chain: HyperliquidChain,
+    pub hyperliquid_chain: Chain,
     /// Signature chain ID.
     ///
     /// For arbitrum use [`super::ARBITRUM_SIGNATURE_CHAIN_ID`].
@@ -1510,10 +1503,17 @@ pub struct SpotSend {
     pub time: u64,
 }
 
-impl SpotSend {
+impl TypedDataProvider for SpotSend {
     #[inline(always)]
-    pub(super) fn typed_data(&self) -> TypedData {
-        get_typed_data::<solidity::SpotSend>(self)
+    fn typed_data(&self) -> Option<TypedData> {
+        Some(get_typed_data::<solidity::SpotSend>(self, None))
+    }
+
+    fn typed_data_multisig(&self, multi_sig_user: Address, lead: Address) -> Option<TypedData> {
+        Some(get_typed_data::<solidity::SpotSend>(
+            self,
+            Some((multi_sig_user, lead)),
+        ))
     }
 }
 
@@ -1525,7 +1525,7 @@ impl SpotSend {
 #[serde(rename_all = "camelCase")]
 pub struct SendAsset {
     /// The chain this action is being executed on.
-    pub hyperliquid_chain: HyperliquidChain,
+    pub hyperliquid_chain: Chain,
     /// Signature chain ID.
     ///
     /// For arbitrum use [`super::ARBITRUM_SIGNATURE_CHAIN_ID`].
@@ -1548,24 +1548,41 @@ pub struct SendAsset {
     pub nonce: u64,
 }
 
-impl SendAsset {
+impl TypedDataProvider for SendAsset {
     #[inline(always)]
-    pub(super) fn typed_data(&self) -> TypedData {
-        get_typed_data::<solidity::SendAsset>(self)
+    fn typed_data(&self) -> Option<TypedData> {
+        Some(get_typed_data::<solidity::SendAsset>(self, None))
+    }
+
+    fn typed_data_multisig(&self, multi_sig_user: Address, lead: Address) -> Option<TypedData> {
+        Some(get_typed_data::<solidity::SendAsset>(
+            self,
+            Some((multi_sig_user, lead)),
+        ))
     }
 }
 
-/// Chain for Hyperliquid transactions.
-///
-/// Indicates whether the transaction is on mainnet or testnet.
-#[derive(Serialize, Debug, Copy, Clone, derive_more::Display)]
-#[serde(rename_all = "PascalCase")]
-pub enum HyperliquidChain {
-    #[display("Mainnet")]
-    Mainnet,
-    #[display("Testnet")]
-    Testnet,
+impl TypedDataProvider for UsdSend {
+    #[inline(always)]
+    fn typed_data(&self) -> Option<TypedData> {
+        Some(get_typed_data::<solidity::UsdSend>(self, None))
+    }
+
+    fn typed_data_multisig(&self, multi_sig_user: Address, lead: Address) -> Option<TypedData> {
+        Some(get_typed_data::<solidity::UsdSend>(
+            self,
+            Some((multi_sig_user, lead)),
+        ))
+    }
 }
+
+// RMP-based actions use the default TypedDataProvider implementation (returns None)
+impl TypedDataProvider for BatchOrder {}
+impl TypedDataProvider for BatchModify {}
+impl TypedDataProvider for BatchCancel {}
+impl TypedDataProvider for BatchCancelCloid {}
+impl TypedDataProvider for ScheduleCancel {}
+impl TypedDataProvider for MultiSigAction {}
 
 /// Multi-signature action payload.
 ///
@@ -1641,6 +1658,8 @@ impl Action {
         rmp_hash(self, nonce, maybe_vault_address, maybe_expires_after)
     }
 }
+
+impl TypedDataProvider for Action {}
 
 impl Signable for Action {
     fn sign<S: SignerSync>(
@@ -1798,7 +1817,10 @@ pub(super) mod solidity {
 /// Returns the EIP712 domain and EIP712 types of the `T` message.
 ///
 /// The returned `TypedData` can be used to sign the message with an Ethereum signer.
-pub(super) fn get_typed_data<T: SolStruct>(msg: &impl Serialize) -> TypedData {
+pub(super) fn get_typed_data<T: SolStruct>(
+    msg: &impl Serialize,
+    multi_sig: Option<(Address, Address)>,
+) -> TypedData {
     let mut resolver = Resolver::from_struct::<T>();
     resolver
         .ingest_string(T::eip712_encode_type())
@@ -1808,11 +1830,21 @@ pub(super) fn get_typed_data<T: SolStruct>(msg: &impl Serialize) -> TypedData {
     let agent_type = types.remove(T::NAME).unwrap();
     types.insert(format!("{HYPERLIQUID_EIP_PREFIX}{}", T::NAME), agent_type);
 
+    let mut msg = serde_json::to_value(msg).unwrap();
+    if let Some((multi_sig_address, lead)) = multi_sig {
+        let obj = msg.as_object_mut().unwrap();
+        obj.insert(
+            "payloadMultiSigUser".into(),
+            multi_sig_address.to_string().to_lowercase().into(),
+        );
+        obj.insert("outerSigner".into(), lead.to_string().to_lowercase().into());
+    }
+
     TypedData {
         domain: ARBITRUM_MAINNET_EIP712_DOMAIN,
         resolver: Resolver::from(types),
         primary_type: format!("{HYPERLIQUID_EIP_PREFIX}{}", T::NAME),
-        message: serde_json::to_value(msg).unwrap(),
+        message: msg,
     }
 }
 

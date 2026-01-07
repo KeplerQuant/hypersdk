@@ -8,7 +8,7 @@ use hypersdk::{
     Address,
     hypercore::{
         self as hypercore, ARBITRUM_SIGNATURE_CHAIN_ID,
-        types::{HyperliquidChain, UsdSend},
+        types::{Chain, UsdSend},
     },
 };
 use rust_decimal::Decimal;
@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .send_usdc(
             &signer,
             UsdSend {
-                hyperliquid_chain: HyperliquidChain::Mainnet,
+                hyperliquid_chain: Chain::Mainnet,
                 signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
                 destination: signer.address(),
                 amount: args.amount,

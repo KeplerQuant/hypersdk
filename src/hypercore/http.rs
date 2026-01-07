@@ -64,21 +64,20 @@ use alloy::{
     primitives::Address,
     signers::{Signer, SignerSync},
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
-use reqwest::header;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::{signing::*, types::HyperliquidChain};
+use super::signing::*;
 use crate::hypercore::{
     ARBITRUM_SIGNATURE_CHAIN_ID, Chain, Cloid, OidOrCloid, PerpMarket, SpotMarket, SpotToken,
     mainnet_url, testnet_url,
     types::{
         Action, ApiResponse, BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder,
-        Fill, MultiSigAction, OkResponse, OrderResponseStatus, OrderUpdate, ScheduleCancel,
-        SendAsset, SendToken, SpotSend, UsdSend, UserBalance,
+        Fill, OkResponse, OrderResponseStatus, OrderUpdate, ScheduleCancel, SendAsset, SendToken,
+        SpotSend, UsdSend, UserBalance,
     },
 };
 
@@ -705,7 +704,7 @@ impl Client {
         self.spot_send(
             &signer,
             SpotSend {
-                hyperliquid_chain: HyperliquidChain::Mainnet,
+                hyperliquid_chain: Chain::Mainnet,
                 signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
                 destination,
                 token: SendToken(token),
@@ -737,7 +736,7 @@ impl Client {
         self.send_asset(
             signer,
             SendAsset {
-                hyperliquid_chain: HyperliquidChain::Mainnet,
+                hyperliquid_chain: Chain::Mainnet,
                 signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
                 destination: signer.address(),
                 source_dex: "".into(),
@@ -772,7 +771,7 @@ impl Client {
         self.send_asset(
             signer,
             SendAsset {
-                hyperliquid_chain: HyperliquidChain::Mainnet,
+                hyperliquid_chain: Chain::Mainnet,
                 signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
                 destination: signer.address(),
                 source_dex: "spot".into(),
@@ -1028,47 +1027,56 @@ impl Client {
         }
     }
 
-    /// Send a signed action hashing with rmp.
-    fn send_sign_rmp_multisig<S: SignerSync>(
-        &self,
-        signer: &S,
-        action: MultiSigAction,
-        nonce: u64,
-        maybe_vault_address: Option<Address>,
-        maybe_expires_after: Option<DateTime<Utc>>,
-    ) -> impl Future<Output = Result<ApiResponse>> + Send + 'static {
-        let res = action.sign(
-            signer,
-            nonce,
-            maybe_vault_address,
-            maybe_expires_after,
-            self.chain,
-        );
-
-        let http_client = self.http_client.clone();
-        let mut url = self.base_url.clone();
-        url.set_path("/exchange");
-
-        async move {
-            let req = res?;
-            // let text = serde_json::to_string(&req).context("serde_json::to_string")?;
-            let res = http_client
-                .post(url)
-                .timeout(Duration::from_secs(5))
-                // .header(header::CONTENT_TYPE, "application/json")
-                // .body(text)
-                .json(&req)
-                .send()
-                .await?
-                .json()
-                .await?;
-            Ok(res)
-        }
-    }
-
     // TODO: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#retrieve-a-users-subaccounts
 }
 
+/// Builder for constructing and executing multisig transactions on Hyperliquid.
+///
+/// The `MultiSig` struct provides a fluent API for building multisig transactions that require
+/// multiple signers to authorize actions. It collects signatures from all required signers and
+/// submits the complete multisig transaction to the exchange.
+///
+/// # Multisig Flow
+///
+/// 1. Create a `MultiSig` instance via `Client::multi_sig()`
+/// 2. Add signers using `signer()` or `signers()`
+/// 3. Execute an action (e.g., `place()`, `send_usdc()`)
+/// 4. The builder collects signatures from all signers
+/// 5. The lead signer submits the transaction
+///
+/// # Type Parameters
+///
+/// - `'a`: Lifetime of the client and signer references
+/// - `S`: The signer type implementing `SignerSync + Signer`
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use hypersdk::hypercore::Client;
+/// use alloy::signers::local::PrivateKeySigner;
+///
+/// let client = Client::mainnet();
+/// let lead_signer: PrivateKeySigner = "0x...".parse()?;
+/// let signer2: PrivateKeySigner = "0x...".parse()?;
+/// let signer3: PrivateKeySigner = "0x...".parse()?;
+/// let multisig_address = "0x...".parse()?;
+/// let nonce = chrono::Utc::now().timestamp_millis() as u64;
+///
+/// // Execute a multisig order
+/// let response = client
+///     .multi_sig(&lead_signer, multisig_address, nonce)
+///     .signer(&signer2)
+///     .signer(&signer3)
+///     .place(order, None, None)
+///     .await?;
+/// ```
+///
+/// # Notes
+///
+/// - The lead signer is the one who submits the transaction but also signs it
+/// - All signers (including lead) must be authorized on the multisig wallet
+/// - The order of signers should match the wallet's configuration
+/// - Nonce must be unique for each transaction (typically millisecond timestamp)
 pub struct MultiSig<'a, S: SignerSync + Signer> {
     lead: &'a S,
     multi_sig_user: Address,
@@ -1081,16 +1089,128 @@ impl<'a, S> MultiSig<'a, S>
 where
     S: SignerSync + Signer,
 {
+    /// Add a single signer to the multisig transaction.
+    ///
+    /// This method adds one signer to the list of signers who will authorize the transaction.
+    /// You can chain multiple calls to add multiple signers.
+    ///
+    /// # Parameters
+    ///
+    /// - `signer`: A reference to the signer to add
+    ///
+    /// # Returns
+    ///
+    /// Returns `self` for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// client
+    ///     .multi_sig(&lead, multisig_addr, nonce)
+    ///     .signer(&signer1)
+    ///     .signer(&signer2)
+    ///     .signer(&signer3)
+    ///     .place(order, None, None)
+    ///     .await?;
+    /// ```
     pub fn signer(mut self, signer: &'a S) -> Self {
         self.signers.push_back(signer);
         self
     }
 
+    /// Add multiple signers to the multisig transaction.
+    ///
+    /// This method adds a collection of signers at once. More convenient than calling
+    /// `signer()` multiple times when you have signers in a collection.
+    ///
+    /// # Parameters
+    ///
+    /// - `signers`: An iterable collection of signer references
+    ///
+    /// # Returns
+    ///
+    /// Returns `self` for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let signers = vec![&signer1, &signer2, &signer3];
+    ///
+    /// client
+    ///     .multi_sig(&lead, multisig_addr, nonce)
+    ///     .signers(signers)
+    ///     .place(order, None, None)
+    ///     .await?;
+    /// ```
     pub fn signers(mut self, signers: impl IntoIterator<Item = &'a S>) -> Self {
         self.signers.extend(signers);
         self
     }
 
+    /// Place orders using the multisig account.
+    ///
+    /// This method collects signatures from all signers for a batch order placement using
+    /// RMP (MessagePack) hashing, then submits the multisig transaction to the exchange.
+    ///
+    /// # Process
+    ///
+    /// 1. Creates an RMP hash of the order action
+    /// 2. Each signer signs the hash using EIP-712
+    /// 3. Collects all signatures into a `MultiSigAction`
+    /// 4. Lead signer submits the complete transaction
+    ///
+    /// # Parameters
+    ///
+    /// - `batch`: The batch order to place
+    /// - `vault_address`: Optional vault address if trading on behalf of a vault
+    /// - `expires_after`: Optional expiration time for the request
+    ///
+    /// # Returns
+    ///
+    /// A future that resolves to a vector of `OrderResponseStatus` for each order in the batch,
+    /// or an `ActionError` containing the failed order CLOIDs and error message.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use hypersdk::hypercore::types::{BatchOrder, OrderRequest, OrderTypePlacement, TimeInForce};
+    /// use rust_decimal::dec;
+    ///
+    /// let order = OrderRequest {
+    ///     asset: 0,
+    ///     is_buy: true,
+    ///     limit_px: dec!(50000),
+    ///     sz: dec!(0.1),
+    ///     reduce_only: false,
+    ///     order_type: OrderTypePlacement::Limit {
+    ///         tif: TimeInForce::Gtc,
+    ///     },
+    ///     cloid: [0u8; 16].into(),
+    /// };
+    ///
+    /// let batch = BatchOrder {
+    ///     orders: vec![order],
+    ///     grouping: OrderGrouping::Na,
+    /// };
+    ///
+    /// let statuses = client
+    ///     .multi_sig(&lead, multisig_addr, nonce)
+    ///     .signers(&signers)
+    ///     .place(batch, None, None)
+    ///     .await?;
+    ///
+    /// for status in statuses {
+    ///     match status {
+    ///         OrderResponseStatus::Resting { oid, .. } => {
+    ///             println!("Order {} placed", oid);
+    ///         }
+    ///         OrderResponseStatus::Error(err) => {
+    ///             eprintln!("Order failed: {}", err);
+    ///         }
+    ///         _ => {}
+    ///     }
+    /// }
+    /// ```
     pub fn place(
         &self,
         batch: BatchOrder,
@@ -1100,7 +1220,7 @@ where
     {
         let cloids: Vec<_> = batch.orders.iter().map(|req| req.cloid).collect();
 
-        let res = multisig_collect_rmp_signatures(
+        let res = multisig_collect_signatures(
             self.lead.address(),
             self.multi_sig_user,
             self.signers.iter().copied(),
@@ -1109,13 +1229,8 @@ where
             self.client.chain,
         )
         .map(|action| {
-            self.client.send_sign_rmp_multisig(
-                &self.lead,
-                action,
-                self.nonce,
-                vault_address,
-                expires_after,
-            )
+            self.client
+                .sign_and_send(&self.lead, action, self.nonce, vault_address, expires_after)
         });
 
         async move {
@@ -1144,9 +1259,16 @@ where
     /// This method collects signatures from all signers for a USDC transfer using EIP-712
     /// typed data, then submits the multisig transaction to the exchange.
     ///
+    /// # Process
+    ///
+    /// 1. Creates EIP-712 typed data from the UsdSend action
+    /// 2. Each signer signs the typed data directly using EIP-712
+    /// 3. Collects all signatures into a `MultiSigAction`
+    /// 4. Lead signer submits the complete transaction
+    ///
     /// # Parameters
     ///
-    /// - `send`: The UsdSend parameters (destination, amount, etc.)
+    /// - `send`: The UsdSend parameters (destination, amount, time, chain, etc.)
     ///
     /// # Returns
     ///
@@ -1155,14 +1277,15 @@ where
     /// # Example
     ///
     /// ```rust,ignore
-    /// use hypersdk::hypercore::types::{UsdSend, HyperliquidChain};
-    /// use rust_decimal::Decimal;
+    /// use hypersdk::hypercore::types::{UsdSend, Chain};
+    /// use hypersdk::hypercore::ARBITRUM_SIGNATURE_CHAIN_ID;
+    /// use rust_decimal::dec;
     ///
     /// let send = UsdSend {
-    ///     hyperliquid_chain: HyperliquidChain::Mainnet,
-    ///     signature_chain_id: "0xa4b1",
-    ///     destination: "0x...".parse()?,
-    ///     amount: Decimal::from(100),
+    ///     hyperliquid_chain: Chain::Mainnet,
+    ///     signature_chain_id: ARBITRUM_SIGNATURE_CHAIN_ID,
+    ///     destination: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb".parse()?,
+    ///     amount: dec!(100),
     ///     time: chrono::Utc::now().timestamp_millis() as u64,
     /// };
     ///
@@ -1171,20 +1294,29 @@ where
     ///     .signers(&signers)
     ///     .send_usdc(send)
     ///     .await?;
+    ///
+    /// println!("Successfully sent 100 USDC from multisig account");
     /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Uses EIP-712 typed data signatures (different from order placement which uses RMP)
+    /// - Time should typically be the current timestamp in milliseconds
+    /// - Destination can be any valid Ethereum address
+    /// - Amount is in USDC (6 decimals on-chain, but use regular decimal representation)
     pub fn send_usdc(&self, send: UsdSend) -> impl Future<Output = Result<()>> + Send + 'static {
-        let typed_data = send.typed_data();
-
-        let res = multisig_collect_typed_data_signatures(
+        let nonce = send.time;
+        let res = multisig_collect_signatures(
             self.lead.address(),
             self.multi_sig_user,
             self.signers.iter().copied(),
             Action::UsdSend(send),
-            typed_data,
+            nonce,
+            self.client.chain,
         )
         .map(|action| {
             self.client
-                .send_sign_rmp_multisig(&self.lead, action, self.nonce, None, None)
+                .sign_and_send(&self.lead, action, self.nonce, None, None)
         });
 
         async move {

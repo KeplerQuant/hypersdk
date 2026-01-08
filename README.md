@@ -229,10 +229,6 @@ let conservative_ask = btc.round_by_side(Side::Ask, dec!(93231.4), true);  // Ro
 let aggressive_bid = btc.round_by_side(Side::Bid, dec!(93231.4), false);   // Rounds up to 93232
 ```
 
-### WebSocket Subscriptions
-
-Subscribe to real-time market data:
-
 ### Transfers support
 
 Transfer assets between three contexts: perpetual balance, spot balance, and HyperEVM.
@@ -255,7 +251,8 @@ client.transfer_to_spot(&signer, dec!(100.0), "USDC", nonce).await?;
 
 ### HIP-3: Multi-DEX Support
 
-The SDK supports [HIP-3](https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals), allowing you to query and trade HIP-3 perpetual markets:
+The SDK supports [HIP-3](https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals),
+allowing you to query and trade HIP-3 perpetual markets:
 
 ```rust
 use hypersdk::hypercore;

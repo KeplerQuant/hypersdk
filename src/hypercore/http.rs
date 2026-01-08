@@ -56,8 +56,8 @@ use url::Url;
 
 use super::signing::*;
 use crate::hypercore::{
-    ActionError, Chain, Cloid, Dex, OidOrCloid, PerpMarket, SpotMarket, SpotToken, mainnet_url,
-    testnet_url,
+    ActionError, Chain, Cloid, Dex, OidOrCloid, PerpMarket, Signature, SpotMarket, SpotToken,
+    mainnet_url, testnet_url,
     types::{
         Action, ApiResponse, BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder,
         Fill, InfoRequest, OkResponse, OrderResponseStatus, OrderUpdate, ScheduleCancel, SendAsset,
@@ -964,6 +964,7 @@ impl Client {
             lead,
             multi_sig_user,
             signers: VecDeque::new(),
+            signatures: VecDeque::new(),
             client: self,
             nonce,
         }
@@ -1060,6 +1061,7 @@ pub struct MultiSig<'a, S: SignerSync + Signer> {
     lead: &'a S,
     multi_sig_user: Address,
     signers: VecDeque<&'a S>,
+    signatures: VecDeque<Signature>,
     nonce: u64,
     client: &'a Client,
 }
@@ -1123,6 +1125,54 @@ where
     /// ```
     pub fn signers(mut self, signers: impl IntoIterator<Item = &'a S>) -> Self {
         self.signers.extend(signers);
+        self
+    }
+
+    /// Append pre-existing signatures to the multisig transaction.
+    ///
+    /// This method allows you to include signatures that were already collected separately,
+    /// rather than generating them from signers. This is useful when:
+    /// - Signatures were collected offline or asynchronously
+    /// - You're aggregating signatures from multiple sources
+    /// - You have a partial multisig that needs additional signatures
+    ///
+    /// The signatures should be in the same order and format as expected by the multisig
+    /// wallet configuration.
+    ///
+    /// # Parameters
+    ///
+    /// - `signatures`: An iterable collection of pre-existing signatures
+    ///
+    /// # Returns
+    ///
+    /// Returns `self` for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use hypersdk::hypercore::types::Signature;
+    ///
+    /// // Signatures collected from external sources
+    /// let existing_sigs: Vec<Signature> = vec![
+    ///     sig1, sig2, sig3
+    /// ];
+    ///
+    /// client
+    ///     .multi_sig(&lead, multisig_addr, nonce)
+    ///     .signatures(existing_sigs)
+    ///     .signer(&additional_signer)  // Can still add more signers
+    ///     .place(order, None, None)
+    ///     .await?;
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Signatures are appended in order to the signature list
+    /// - You can mix pre-existing signatures with new signers
+    /// - Ensure signatures match the action being signed and the multisig configuration
+    /// - The total number of signatures must match the multisig threshold
+    pub fn signatures(mut self, signatures: impl IntoIterator<Item = Signature>) -> Self {
+        self.signatures.extend(signatures);
         self
     }
 
@@ -1203,6 +1253,7 @@ where
             self.lead.address(),
             self.multi_sig_user,
             self.signers.iter().copied(),
+            self.signatures.iter().copied(),
             Action::Order(batch),
             self.nonce,
             self.client.chain,
@@ -1289,6 +1340,7 @@ where
             self.lead.address(),
             self.multi_sig_user,
             self.signers.iter().copied(),
+            self.signatures.iter().copied(),
             send.into_action(self.client.chain().arbitrum_id(), self.client.chain())
                 .into(),
             nonce,
@@ -1376,6 +1428,7 @@ where
             self.lead.address(),
             self.multi_sig_user,
             self.signers.iter().copied(),
+            self.signatures.iter().copied(),
             send.into_action(self.client.chain().arbitrum_id(), self.client.chain())
                 .into(),
             nonce,

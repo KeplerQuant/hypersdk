@@ -7,12 +7,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `hypersdk` is a Rust SDK for the Hyperliquid decentralized exchange protocol, providing type-safe interfaces for trading, market data, and DeFi integrations.
 
 The codebase is split into two main modules:
+
 - **`hypercore`**: Native L1 chain with perpetual/spot markets, HTTP API, WebSocket streams
 - **`hyperevm`**: Ethereum-compatible layer with integrations for Morpho (lending) and Uniswap V3
 
 ## Commands
 
 ### Build and Test
+
 ```bash
 # Build the project
 cargo build
@@ -36,6 +38,7 @@ cargo check
 ### Running Examples
 
 Examples require a private key set via environment variable:
+
 ```bash
 export PRIVATE_KEY="your_private_key_here"
 
@@ -77,6 +80,7 @@ The `Signable` trait (`src/hypercore/signing.rs`) provides a unified interface -
 ### Module Structure
 
 #### `src/hypercore/` - HyperCore L1 Module
+
 - `mod.rs`: Chain configuration, market types (PerpMarket, SpotMarket, SpotToken), price tick calculation
 - `http.rs`: HTTP client for API operations (place orders, query balances, transfers)
 - `ws.rs`: WebSocket connection for real-time market data and user events
@@ -85,6 +89,7 @@ The `Signable` trait (`src/hypercore/signing.rs`) provides a unified interface -
 - `utils.rs`: Utility functions for serialization helpers, typed data creation, hashing
 
 #### `src/hyperevm/` - HyperEVM Module
+
 - `mod.rs`: Base EVM functionality, wei conversion utilities
 - `morpho/`: Morpho lending protocol integration (APY queries, vault data)
 - `uniswap/`: Uniswap V3 integration (pool queries, position tracking)
@@ -99,6 +104,7 @@ Hyperliquid enforces strict tick size requirements. The SDK provides O(1) tick s
 Algorithm: `decimals = clamp(5 - floor(log10(price)) - 1, 0, max_decimals)`
 
 Implementation in `src/hypercore/mod.rs`:
+
 - `PriceTick` struct with `tick_for()`, `round()`, `round_by_side()` methods
 - Used by `PerpMarket` and `SpotMarket` to validate order prices
 
@@ -111,13 +117,15 @@ Implementation in `src/hypercore/mod.rs`:
 ### Cross-Chain Transfers
 
 Assets can be transferred between three contexts:
+
 - Perpetual trading balance (HyperCore perps)
-- Spot trading balance (HyperCore spot)  
+- Spot trading balance (HyperCore spot)
 - EVM balance (HyperEVM)
 
 Transfer addresses are generated algorithmically: `0x20000000000000000000000000000000000000XX` where XX is the token index. See `generate_evm_transfer_address()` in `src/hypercore/mod.rs`.
 
 The HTTP client provides convenience methods:
+
 - `transfer_to_evm()` / `transfer_from_evm()`
 - `transfer_to_perps()` / `transfer_to_spot()`
 
@@ -170,23 +178,36 @@ Chain-specific constants are accessed via `Chain::arbitrum_id()` method.
 ## Common Patterns
 
 ### Creating an HTTP Client
+
 ```rust
 let client = hypercore::mainnet();  // or testnet()
 let signer: PrivateKeySigner = private_key.parse()?;
 ```
 
 ### Placing Orders
+
 All orders use the `BatchOrder` type even for single orders. Orders require:
+
 - Rounded prices (use `market.round_price()`)
 - Valid cloid (client order ID, defaults to zero)
 - Nonce (typically current timestamp in milliseconds)
 
 ### Handling API Responses
+
 API responses are wrapped in `ApiResponse` enum with `Ok(OkResponse)` or `Err(String)`. The HTTP client unwraps this automatically.
 
 ### Multi-signature Operations
+
 Multisig uses a special flow in `src/hypercore/http.rs`:
-1. Create `MultiSig` context via `client.multi_sig()`
+
+1. Create `MultiSig` context via `client.multi_sig(lead, multisig_address, nonce)`
 2. Add signers with `.signer()` or `.signers()`
-3. Call action method (e.g., `.place()`, `.send_usdc()`)
-4. Collects signatures from all signers and wraps in `MultiSigAction`
+3. Optionally append pre-existing signatures with `.signatures()`
+4. Call action method (e.g., `.place()`, `.send_usdc()`, `.send_asset()`)
+5. Collects signatures from all signers and wraps in `MultiSigAction`
+
+The `signatures()` method allows appending pre-collected signatures, useful for:
+
+- Offline signature collection workflows
+- Aggregating signatures from multiple sources
+- Adding signatures to partial multisig transactions

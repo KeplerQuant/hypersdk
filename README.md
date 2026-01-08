@@ -266,15 +266,18 @@ The SDK supports multi-signature operations for orders and transfers:
 use hypersdk::hypercore::{self, PrivateKeySigner};
 
 let client = hypercore::mainnet();
+let lead_signer: PrivateKeySigner = "lead_key".parse()?;
 let signer1: PrivateKeySigner = "key1".parse()?;
 let signer2: PrivateKeySigner = "key2".parse()?;
-let signer3: PrivateKeySigner = "key3".parse()?;
+let multisig_address = "0x...".parse()?;
+let nonce = chrono::Utc::now().timestamp_millis() as u64;
 
 // Create a multi-sig order
 let result = client
-    .multi_sig()
-    .signers(vec![&signer1, &signer2, &signer3])
-    .place(order, nonce, None, None)
+    .multi_sig(&lead_signer, multisig_address, nonce)
+    .signer(&signer1)
+    .signer(&signer2)
+    .place(order, None, None)
     .await?;
 
 // Multi-sig transfers
@@ -287,9 +290,24 @@ let send = UsdSend {
 };
 
 client
-    .multi_sig()
+    .multi_sig(&lead_signer, multisig_address, nonce)
     .signers(vec![&signer1, &signer2])
     .send_usdc(send)
+    .await?;
+
+// Append pre-existing signatures (useful for offline signature collection)
+use hypersdk::hypercore::types::Signature;
+
+let existing_sigs: Vec<Signature> = vec![
+    "0xaabbcc...".parse()?,
+    "0xddeeff...".parse()?,
+];
+
+client
+    .multi_sig(&lead_signer, multisig_address, nonce)
+    .signatures(existing_sigs)  // Add pre-collected signatures
+    .signer(&signer1)            // Can still add more signers
+    .place(order, None, None)
     .await?;
 ```
 
@@ -350,6 +368,16 @@ This software is provided "as is", without warranty of any kind. Use at your own
 
 - GitHub Issues: [Report bugs or request features](https://github.com/infinitefield/hypersdk/issues)
 - Documentation: [docs.rs/hypersdk](https://docs.rs/hypersdk)
+
+## About us
+
+Infinite Field is a high-frequency trading firm. We build ultra-low-latency systems for execution at scale. Performance is everything.
+
+We prioritize practical solutions over theory. If something works and delivers results, that’s what matters. Performance is always the goal, and every piece of code is written with efficiency and longevity in mind.
+
+If you specialize in performance-critical software, understand systems down to the bare metal, and know how to optimize x64 assembly, we’d love to hear from you.
+
+[Explore career opportunities](https://job-boards.eu.greenhouse.io/infinitefield)
 
 ---
 

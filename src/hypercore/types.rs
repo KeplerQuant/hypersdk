@@ -1744,7 +1744,7 @@ pub(super) enum InfoRequest {
 /// Represents an EIP‑712 signature split into its components.
 #[derive(Clone, Copy, Serialize)]
 #[serde_as]
-pub(super) struct Signature {
+pub struct Signature {
     #[serde(serialize_with = "super::utils::serialize_as_hex")]
     pub r: U256,
     #[serde(serialize_with = "super::utils::serialize_as_hex")]
@@ -1753,8 +1753,16 @@ pub(super) struct Signature {
 }
 
 impl fmt::Display for Signature {
+    /// Formats the signature as a hex string in the format: 0x{r}{s}{v}
+    ///
+    /// This is the standard Ethereum signature format where:
+    /// - r: 32 bytes (64 hex chars)
+    /// - s: 32 bytes (64 hex chars)
+    /// - v: 1 byte (2 hex chars)
+    ///
+    /// Total: 130 hex characters (0x prefix + 128 chars)
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "r: 0x{:x}, s: 0x{:x}, v: {}", self.r, self.r, self.v)
+        write!(f, "0x{:064x}{:064x}{:02x}", self.r, self.s, self.v)
     }
 }
 
@@ -1765,6 +1773,55 @@ impl fmt::Debug for Signature {
             .field("s", &format!("0x{:x}", self.s))
             .field("v", &self.v)
             .finish()
+    }
+}
+
+impl std::str::FromStr for Signature {
+    type Err = anyhow::Error;
+
+    /// Parses a signature from a hex string.
+    ///
+    /// The input can be:
+    /// - With or without "0x" prefix
+    /// - 130 hex characters (65 bytes: r=32, s=32, v=1)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hypersdk::hypercore::types::Signature;
+    ///
+    /// // With 0x prefix
+    /// let sig: Signature = "0xaabbcc...".parse()?;
+    ///
+    /// // Without 0x prefix
+    /// let sig: Signature = "aabbcc...".parse()?;
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Remove 0x prefix if present
+        let hex_str = s.strip_prefix("0x").unwrap_or(s);
+
+        // Validate length (130 hex chars = 65 bytes)
+        if hex_str.len() != 130 {
+            anyhow::bail!(
+                "Invalid signature length: expected 130 hex characters (65 bytes), got {}",
+                hex_str.len()
+            );
+        }
+
+        // Parse r (first 64 hex chars = 32 bytes)
+        let r = U256::from_str_radix(&hex_str[..64], 16)
+            .map_err(|e| anyhow::anyhow!("Failed to parse r component: {}", e))?;
+
+        // Parse s (next 64 hex chars = 32 bytes)
+        let s = U256::from_str_radix(&hex_str[64..128], 16)
+            .map_err(|e| anyhow::anyhow!("Failed to parse s component: {}", e))?;
+
+        // Parse v (last 2 hex chars = 1 byte)
+        let v = u64::from_str_radix(&hex_str[128..130], 16)
+            .map_err(|e| anyhow::anyhow!("Failed to parse v component: {}", e))?;
+
+        Ok(Signature { r, s, v })
     }
 }
 
@@ -2105,5 +2162,128 @@ mod tests {
         }"#;
         let res = serde_json::from_str::<ApiResponse>(text);
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_signature_from_str_with_0x_prefix() {
+        let hex_sig = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b";
+        let sig: Signature = hex_sig.parse().unwrap();
+
+        assert_eq!(
+            sig.r,
+            U256::from_str_radix(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                16
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            sig.s,
+            U256::from_str_radix(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                16
+            )
+            .unwrap()
+        );
+        assert_eq!(sig.v, 27);
+    }
+
+    #[test]
+    fn test_signature_from_str_without_0x_prefix() {
+        let hex_sig = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b";
+        let sig: Signature = hex_sig.parse().unwrap();
+
+        assert_eq!(
+            sig.r,
+            U256::from_str_radix(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                16
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            sig.s,
+            U256::from_str_radix(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                16
+            )
+            .unwrap()
+        );
+        assert_eq!(sig.v, 27);
+    }
+
+    #[test]
+    fn test_signature_from_str_invalid_length() {
+        let hex_sig = "0x1234"; // Too short
+        let result: Result<Signature, _> = hex_sig.parse();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid signature length")
+        );
+    }
+
+    #[test]
+    fn test_signature_from_str_invalid_hex() {
+        let hex_sig = "0xGGGG567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b";
+        let result: Result<Signature, _> = hex_sig.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_signature_display_format() {
+        let sig = Signature {
+            r: U256::from_str_radix(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                16,
+            )
+            .unwrap(),
+            s: U256::from_str_radix(
+                "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
+                16,
+            )
+            .unwrap(),
+            v: 28,
+        };
+
+        let display_str = sig.to_string();
+        assert!(display_str.starts_with("0x"));
+        assert_eq!(display_str.len(), 132); // 0x + 64 + 64 + 2 = 132
+        assert!(
+            display_str
+                .contains("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+        );
+        assert!(
+            display_str
+                .contains("fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321")
+        );
+        assert!(display_str.ends_with("1c")); // v=28 = 0x1c
+    }
+
+    #[test]
+    fn test_signature_roundtrip() {
+        let original = Signature {
+            r: U256::from_str_radix(
+                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                16,
+            )
+            .unwrap(),
+            s: U256::from_str_radix(
+                "0987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba",
+                16,
+            )
+            .unwrap(),
+            v: 27,
+        };
+
+        // Convert to string and back
+        let sig_str = original.to_string();
+        let parsed: Signature = sig_str.parse().unwrap();
+
+        assert_eq!(original.r, parsed.r);
+        assert_eq!(original.s, parsed.s);
+        assert_eq!(original.v, parsed.v);
     }
 }

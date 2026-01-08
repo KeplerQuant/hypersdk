@@ -447,20 +447,23 @@ pub(super) fn multisig_lead_msg<S: SignerSync>(
     })
 }
 
-/// Collects signatures from all signers for a multisig action.
+/// Collects signatures from all signers for a multisig action, with support for appending pre-existing signatures.
 ///
 /// This function implements the Hyperliquid multisig signature collection protocol.
 /// It handles both EIP-712 typed data actions (transfers) and RMP-based actions (orders, cancels).
+/// Additionally, it allows you to append pre-existing signatures that were collected separately.
 ///
 /// # Process
 ///
 /// For EIP-712 typed data actions (UsdSend, SpotSend, SendAsset):
 /// 1. Gets multisig typed data via `action.typed_data_multisig()`
 /// 2. Each signer signs the typed data directly
+/// 3. Appends pre-existing signatures to the collection
 ///
 /// For RMP-based actions (orders, cancels, modifications):
 /// 1. Creates an RMP hash from: `[multisig_user, lead_signer, action]`
 /// 2. Each signer signs the hash using EIP-712 with the L1 Agent wrapper
+/// 3. Appends pre-existing signatures to the collection
 ///
 /// # Address Normalization
 ///
@@ -471,14 +474,38 @@ pub(super) fn multisig_lead_msg<S: SignerSync>(
 ///
 /// - `lead`: The lead signer who will submit the transaction
 /// - `multi_sig_user`: The multisig account address
-/// - `signers`: Iterator of signers who will sign the action
+/// - `signers`: Iterator of signers who will sign the action (generates new signatures)
+/// - `signed`: Iterator of pre-existing signatures to append (collected separately)
 /// - `inner_action`: The action to be signed (Order, Cancel, etc.)
 /// - `nonce`: Unique transaction nonce
 /// - `chain`: The chain (mainnet/testnet)
 ///
 /// # Returns
 ///
-/// A `MultiSigAction` containing all collected signatures and the action payload.
+/// A `MultiSigAction` containing all collected signatures (new + existing) and the action payload.
+///
+/// # Use Cases
+///
+/// - **Offline signature collection**: Collect signatures asynchronously and combine them
+/// - **Partial multisigs**: Add additional signatures to an existing partial multisig
+/// - **Multi-source aggregation**: Combine signatures from different systems or parties
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use hypersdk::hypercore::signing::multisig_collect_signatures;
+///
+/// // Collect new signatures from some signers and append pre-existing ones
+/// let multisig_action = multisig_collect_signatures(
+///     lead_address,
+///     multisig_wallet_address,
+///     vec![&signer1, &signer2].into_iter(),
+///     existing_signatures.into_iter(),  // Pre-collected signatures
+///     Action::Order(batch_order),
+///     nonce,
+///     Chain::Mainnet,
+/// )?;
+/// ```
 ///
 /// # Reference
 ///
@@ -487,6 +514,7 @@ pub(super) fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
     lead: Address,
     multi_sig_user: Address,
     signers: impl Iterator<Item = &'a S>,
+    signed: impl Iterator<Item = Signature>,
     inner_action: Action,
     nonce: u64,
     chain: Chain,
@@ -496,7 +524,7 @@ pub(super) fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
     let lead_str = lead.to_string().to_lowercase();
 
     // Dispatch to specialized function based on action type
-    let signatures =
+    let mut signatures =
         if let Some(typed_data) = inner_action.typed_data_multisig(multi_sig_user, lead) {
             // EIP-712 typed data actions (UsdSend, SpotSend, SendAsset)
             multisig_collect_eip712_signatures(signers, typed_data)?
@@ -511,6 +539,7 @@ pub(super) fn multisig_collect_signatures<'a, S: SignerSync + Signer + 'a>(
                 chain,
             )?
         };
+    signatures.extend(signed);
 
     Ok(MultiSigAction {
         signature_chain_id: ARBITRUM_TESTNET_CHAIN_ID,

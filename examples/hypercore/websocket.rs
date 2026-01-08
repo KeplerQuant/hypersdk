@@ -1,3 +1,37 @@
+//! Subscribe to real-time market data via WebSocket.
+//!
+//! This example demonstrates how to use WebSocket subscriptions to receive
+//! live price updates for a specific market. It subscribes to all mid prices
+//! and filters for KHYPE market updates.
+//!
+//! # Usage
+//!
+//! ```bash
+//! cargo run --example websocket
+//! ```
+//!
+//! # What it does
+//!
+//! 1. Connects to Hyperliquid mainnet
+//! 2. Queries spot markets to find KHYPE
+//! 3. Subscribes to all mid prices via WebSocket
+//! 4. Continuously prints KHYPE price updates as they arrive
+//!
+//! # Output
+//!
+//! ```text
+//! Price of KHYPE/USDC is 1.234
+//! Price of KHYPE/USDC is 1.235
+//! ...
+//! ```
+//!
+//! # Available Subscriptions
+//!
+//! - `AllMids`: Mid prices for all markets
+//! - `Trades { coin }`: Real-time trades for a specific coin
+//! - `L2Book { coin }`: Order book updates
+//! - `UserEvents { user }`: User-specific events (fills, liquidations)
+
 use anyhow::Context;
 use futures::StreamExt;
 use hypersdk::hypercore::{

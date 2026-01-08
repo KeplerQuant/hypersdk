@@ -1,3 +1,31 @@
+//! Place a limit order on a perpetual market.
+//!
+//! This example demonstrates how to place a buy limit order on the BTC perpetual market.
+//! It shows proper price handling, order configuration, and response parsing.
+//!
+//! # Usage
+//!
+//! ```bash
+//! cargo run --example send_order -- --private-key YOUR_PRIVATE_KEY
+//! ```
+//!
+//! # What it does
+//!
+//! 1. Connects to Hyperliquid mainnet
+//! 2. Finds the BTC perpetual market
+//! 3. Places a buy limit order at $87,000 for 0.01 BTC
+//! 4. Uses ALO (Add Liquidity Only) to ensure maker execution
+//! 5. Prints the order response with order ID
+//!
+//! # Order Configuration
+//!
+//! - Market: BTC perpetual
+//! - Side: Buy
+//! - Price: $87,000
+//! - Size: 0.01 BTC
+//! - Type: Limit with ALO (Add Liquidity Only)
+//! - Reduce Only: false (can increase position)
+
 use std::{
     str::FromStr,
     time::{SystemTime, UNIX_EPOCH},

@@ -1,3 +1,41 @@
+//! Find Morpho vaults with highest APY on HyperEVM.
+//!
+//! This example scans all Morpho markets on Hyperliquid's EVM layer and calculates
+//! their current borrow and supply APY. It's useful for yield optimization strategies,
+//! lending aggregators, or market research.
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Using default settings (localhost RPC)
+//! cargo run --example highest_apy
+//!
+//! # Using Hyperliquid public RPC
+//! cargo run --example highest_apy -- \
+//!   --rpc-url https://rpc.hyperliquid.xyz/evm
+//! ```
+//!
+//! # What it does
+//!
+//! 1. Connects to HyperEVM via RPC
+//! 2. Scans blockchain for all Morpho CreateMarket events
+//! 3. Fetches current market state (borrowed, supplied amounts)
+//! 4. Calculates real-time borrow and supply APY
+//! 5. Displays top 10 markets sorted by total borrowed amount
+//!
+//! # Output
+//!
+//! ```text
+//! ----------------
+//! collateral: 0x1234...
+//! loan token: 0x5678...
+//! LLTV: 860000000000000000
+//! borrowed: 1000000000000000000
+//! supplied: 2000000000000000000
+//! borrow apy: 8.5
+//! supply apy: 4.2
+//! ```
+
 use std::cmp::Reverse;
 
 use alloy::{providers::Provider, rpc::types::Filter, sol, sol_types::SolEvent};

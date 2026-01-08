@@ -167,29 +167,57 @@ pub enum Outgoing {
     Pong,
 }
 
-/// Subscription message.
+/// WebSocket subscription request.
 ///
 /// Each variant corresponds to a subscription type that can be requested from the WebSocket API.
+/// After subscribing, you'll receive corresponding [`Incoming`] messages.
 ///
 /// # Market Data Subscriptions
 ///
-/// - **Bbo**: Best bid and offer updates for a market
-/// - **Trades**: Real-time trade feed for a market
-/// - **L2Book**: Order book snapshots and updates (Level 2 depth)
-/// - **Candle**: Real-time candlestick (OHLCV) updates for a market
-/// - **AllMids**: Mid prices for all markets (optionally filtered by DEX)
+/// | Subscription | Incoming Message | Description |
+/// |--------------|------------------|-------------|
+/// | [`Bbo`](Self::Bbo) | [`Incoming::Bbo`] | Best bid and offer updates |
+/// | [`Trades`](Self::Trades) | [`Incoming::Trades`] | Real-time trades |
+/// | [`L2Book`](Self::L2Book) | [`Incoming::L2Book`] | Order book updates |
+/// | [`Candle`](Self::Candle) | [`Incoming::Candle`] | Candlestick (OHLCV) data |
+/// | [`AllMids`](Self::AllMids) | [`Incoming::AllMids`] | Mid prices for all markets |
 ///
 /// # User-Specific Subscriptions
 ///
-/// - **OrderUpdates**: Real-time updates for user's orders (status changes)
-/// - **UserFills**: Real-time fills for user's orders (executions)
+/// | Subscription | Incoming Message | Description |
+/// |--------------|------------------|-------------|
+/// | [`OrderUpdates`](Self::OrderUpdates) | [`Incoming::OrderUpdates`] | Order status changes |
+/// | [`UserFills`](Self::UserFills) | [`Incoming::UserFills`] | Trade fills |
+///
+/// # Related Types
+///
+/// - [`Incoming`]: Messages received from WebSocket subscriptions
+/// - [`WebSocket`](crate::hypercore::ws::Connection): WebSocket client
+/// - [`Bbo`], [`Trade`], [`L2Book`], [`Candle`], [`OrderUpdate`], [`Fill`]: Data types
 ///
 /// # Example
 ///
-/// - Subscribe to BTC best bid/offer with `Subscription::Bbo { coin: "BTC".to_string() }`
-/// - Subscribe to ETH trades with `Subscription::Trades { coin: "ETH".to_string() }`
-/// - Subscribe to 15m BTC candles with `Subscription::Candle { coin: "BTC".to_string(), interval: "15m".to_string() }`
-/// - Subscribe to order updates for your address with `Subscription::OrderUpdates { user: your_address }`
+/// ```no_run
+/// use hypersdk::hypercore::{self, types::*};
+/// use futures::StreamExt;
+///
+/// # async fn example() {
+/// let mut ws = hypercore::mainnet_ws();
+///
+/// // Subscribe to market data
+/// ws.subscribe(Subscription::Bbo { coin: "BTC".into() });
+/// ws.subscribe(Subscription::Trades { coin: "ETH".into() });
+/// ws.subscribe(Subscription::Candle {
+///     coin: "BTC".into(),
+///     interval: "15m".into()
+/// });
+///
+/// // Subscribe to user events
+/// let user = "0x...".parse().unwrap();
+/// ws.subscribe(Subscription::OrderUpdates { user });
+/// ws.subscribe(Subscription::UserFills { user });
+/// # }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, derive_more::Display)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Subscription {
@@ -1447,9 +1475,47 @@ impl OrderResponseStatus {
     }
 }
 
-/// Batch order.
+/// Batch order submission.
 ///
-/// A collection of orders sent together, optionally grouped.
+/// A collection of orders sent together in a single transaction, optionally grouped
+/// for atomic execution (e.g., bracket orders with take-profit and stop-loss).
+///
+/// # When to Use
+///
+/// - **Single order**: Use a vec with one [`OrderRequest`]
+/// - **Multiple independent orders**: Set `grouping` to [`OrderGrouping::Na`]
+/// - **Bracket orders (TP/SL)**: Use [`OrderGrouping::NormalTpsl`] or [`OrderGrouping::PositionTpsl`]
+///
+/// # Related Types
+///
+/// - [`OrderRequest`]: Individual order within the batch
+/// - [`OrderGrouping`]: Grouping strategy for the batch
+/// - [`OrderResponseStatus`]: Response status for each order
+/// - [`HttpClient::place`](crate::hypercore::http::Client::place): Method to submit orders
+///
+/// # Example
+///
+/// ```no_run
+/// use hypersdk::hypercore::types::*;
+/// use rust_decimal_macros::dec;
+///
+/// let order = BatchOrder {
+///     orders: vec![
+///         OrderRequest {
+///             asset: 0, // BTC
+///             is_buy: true,
+///             limit_px: dec!(50000),
+///             sz: dec!(0.1),
+///             reduce_only: false,
+///             order_type: OrderTypePlacement::Limit {
+///                 tif: TimeInForce::Gtc,
+///             },
+///             cloid: Default::default(),
+///         }
+///     ],
+///     grouping: OrderGrouping::Na,
+/// };
+/// ```
 #[derive(Clone, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchOrder {

@@ -36,4 +36,4 @@ jobs:
         run: rustc -Vv && cargo -V
 
       - name: Run tests
-        run: cargo test --lib --locked -- --nocapture
+        run: cargo test --lib -- --nocapture

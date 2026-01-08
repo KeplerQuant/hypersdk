@@ -211,11 +211,6 @@ There are examples in the `examples/` folder. We tried to cover as many cases as
 
 The SDK includes accurate price tick size calculation for both spot and perpetual markets:
 
-- **Perpetual markets**: 5 significant figures with max 6 decimal places (6 - sz_decimals)
-- **Spot markets**: 8 decimal places max (8 - sz_decimals) with dynamic tick sizes
-
-The tick size algorithm maintains precision: `decimals = clamp(5 - floor(log10(price)) - 1, 0, max_decimals)`
-
 ```rust
 use hypersdk::hypercore;
 use rust_decimal_macros::dec;

@@ -1138,6 +1138,7 @@ impl Client {
         self.send(req).await
     }
 
+    #[doc(hidden)]
     pub async fn send(&self, req: ActionRequest) -> Result<ApiResponse> {
         let http_client = self.http_client.clone();
         let mut url = self.base_url.clone();

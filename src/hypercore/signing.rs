@@ -649,6 +649,7 @@ pub(super) fn sign_l1_action_sync<S: SignerSync>(
 }
 
 /// Signs an L1 action with EIP-712.
+#[doc(hidden)]
 #[inline(always)]
 pub async fn sign_l1_action<S: Signer + Send + Sync>(
     signer: &S,
@@ -688,6 +689,7 @@ pub async fn sign_l1_action<S: Signer + Send + Sync>(
 /// - `nonce`: Unique transaction nonce
 /// - `maybe_vault_address`: Optional vault address if trading on behalf of a vault
 /// - `maybe_expires_after`: Optional expiration time for the request
+#[doc(hidden)]
 pub fn multisig_lead_msg_sync<S: SignerSync>(
     signer: &S,
     action: MultiSigAction,
@@ -748,6 +750,7 @@ pub fn multisig_lead_msg_sync<S: SignerSync>(
 /// - `nonce`: Unique transaction nonce
 /// - `maybe_vault_address`: Optional vault address if trading on behalf of a vault
 /// - `maybe_expires_after`: Optional expiration time for the request
+#[doc(hidden)]
 pub async fn multisig_lead_msg<S: Signer + Send + Sync>(
     signer: &S,
     action: MultiSigAction,

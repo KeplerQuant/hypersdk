@@ -1941,6 +1941,7 @@ pub(super) enum InfoRequest {
 }
 
 /// Raw API types.
+#[doc(hidden)]
 pub mod raw {
     use super::*;
 

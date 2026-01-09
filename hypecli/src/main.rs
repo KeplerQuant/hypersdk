@@ -2,14 +2,17 @@ mod balances;
 mod markets;
 mod morpho;
 mod multisig;
+mod to_multisig;
 mod utils;
 
-use clap::Parser;
+use clap::{Args, Parser};
 
 use balances::SpotBalancesCmd;
+use hypersdk::hypercore::Chain;
 use markets::{PerpsCmd, SpotCmd};
 use morpho::MorphoPositionCmd;
 use multisig::MultiSigCmd;
+use to_multisig::ToMultiSigCmd;
 
 /// Main CLI structure for hypecli.
 ///
@@ -29,6 +32,8 @@ enum Cli {
     /// Multi-sig commands
     #[command(subcommand)]
     Multisig(MultiSigCmd),
+    /// Convert a regular user to a multi-sig user
+    ToMultisig(ToMultiSigCmd),
 }
 
 impl Cli {
@@ -39,8 +44,29 @@ impl Cli {
             Self::SpotBalances(cmd) => cmd.run().await,
             Self::MorphoPosition(cmd) => cmd.run().await,
             Self::Multisig(cmd) => cmd.run().await,
+            Self::ToMultisig(cmd) => cmd.run().await,
         }
     }
+}
+
+/// Common arguments for multi-signature commands.
+///
+/// These arguments are shared across all multi-sig operations to specify
+/// the signer credentials and target multi-sig wallet.
+#[derive(Args)]
+pub struct SignerArgs {
+    /// Private key for signing (hex format).
+    #[arg(long)]
+    pub private_key: Option<String>,
+    /// Foundry keystore.
+    #[arg(long)]
+    pub keystore: Option<String>,
+    /// Keystore password. Otherwise it'll be prompted.
+    #[arg(long)]
+    pub password: Option<String>,
+    /// Target chain for the operation.
+    #[arg(long)]
+    pub chain: Chain,
 }
 
 #[tokio::main]

@@ -7,7 +7,7 @@ use alloy::signers::Signer;
 use clap::{Args, Subcommand};
 use futures::StreamExt;
 use hypersdk::hypercore::{
-    self, Chain, HttpClient, NonceHandler, SendAsset, SendToken, Signature,
+    self, HttpClient, NonceHandler, SendAsset, SendToken, Signature,
     raw::{Action, ConvertToMultiSigUser, MultiSigAction, MultiSigPayload},
 };
 use hypersdk::{Address, Decimal};
@@ -17,7 +17,10 @@ use iroh_tickets::endpoint::EndpointTicket;
 use serde::{Deserialize, Serialize};
 use tokio::signal::ctrl_c;
 
-use crate::utils::{self, find_signer, make_topic};
+use crate::{
+    SignerArgs,
+    utils::{self, find_signer, make_topic},
+};
 
 /// Multi-sig commands regardless of your location.
 ///
@@ -40,29 +43,6 @@ impl MultiSigCmd {
     }
 }
 
-/// Common arguments for multi-signature commands.
-///
-/// These arguments are shared across all multi-sig operations to specify
-/// the signer credentials and target multi-sig wallet.
-#[derive(Args)]
-pub struct MultiSigCommon {
-    /// Private key for signing (hex format).
-    #[arg(long)]
-    pub private_key: Option<String>,
-    /// Foundry keystore.
-    #[arg(long)]
-    pub keystore: Option<String>,
-    /// Keystore password. Otherwise it'll be prompted.
-    #[arg(long)]
-    pub password: Option<String>,
-    /// Multi-sig wallet address.
-    #[arg(long)]
-    pub multi_sig_addr: Address,
-    /// Target chain for the operation.
-    #[arg(long)]
-    pub chain: Chain,
-}
-
 /// Command to initiate sending an asset via multi-sig.
 ///
 /// This command creates a multi-sig transaction proposal to send assets from
@@ -72,7 +52,10 @@ pub struct MultiSigCommon {
 pub struct MultiSigSendAsset {
     #[deref]
     #[command(flatten)]
-    pub common: MultiSigCommon,
+    pub common: SignerArgs,
+    /// Multi-sig wallet address.
+    #[arg(long)]
+    pub multi_sig_addr: Address,
     /// Destination address.
     #[arg(long)]
     pub to: Address,
@@ -105,10 +88,13 @@ impl MultiSigSendAsset {
 pub struct MultiSigSign {
     #[deref]
     #[command(flatten)]
-    pub common: MultiSigCommon,
+    pub common: SignerArgs,
     /// Endpoint ticket to connect to the transaction initiator.
     #[arg(long)]
     pub connect: EndpointTicket,
+    /// Multi-sig wallet address.
+    #[arg(long)]
+    pub multi_sig_addr: Address,
 }
 
 impl MultiSigSign {
@@ -262,7 +248,7 @@ async fn execute_multisig_action(
 async fn send_asset(cmd: MultiSigSendAsset) -> anyhow::Result<()> {
     let hl = HttpClient::new(cmd.chain);
     let multisig_config = hl.multi_sig_config(cmd.multi_sig_addr).await?;
-    let signer = find_signer(&cmd.common, &multisig_config.authorized_users).await?;
+    let signer = find_signer(&cmd.common, Some(&multisig_config.authorized_users)).await?;
 
     println!("Using signer {}", signer.address());
 
@@ -306,7 +292,10 @@ async fn send_asset(cmd: MultiSigSendAsset) -> anyhow::Result<()> {
 pub struct MultiSigConvertToNormalUser {
     #[deref]
     #[command(flatten)]
-    pub common: MultiSigCommon,
+    pub common: SignerArgs,
+    /// Multi-sig wallet address.
+    #[arg(long)]
+    pub multi_sig_addr: Address,
 }
 
 impl MultiSigConvertToNormalUser {
@@ -318,7 +307,7 @@ impl MultiSigConvertToNormalUser {
 async fn convert_to_normal_user(cmd: MultiSigConvertToNormalUser) -> anyhow::Result<()> {
     let hl = HttpClient::new(cmd.chain);
     let multisig_config = hl.multi_sig_config(cmd.multi_sig_addr).await?;
-    let signer = find_signer(&cmd.common, &multisig_config.authorized_users).await?;
+    let signer = find_signer(&cmd.common, Some(&multisig_config.authorized_users)).await?;
 
     println!("Using signer {}", signer.address());
     println!(
@@ -353,7 +342,7 @@ async fn sign(cmd: MultiSigSign) -> anyhow::Result<()> {
     let multisig_config = HttpClient::new(cmd.chain)
         .multi_sig_config(cmd.multi_sig_addr)
         .await?;
-    let signer = find_signer(&cmd.common, &multisig_config.authorized_users).await?;
+    let signer = find_signer(&cmd.common, Some(&multisig_config.authorized_users)).await?;
     let key = utils::make_key(&signer);
 
     println!("Signer found using {}", signer.address());

@@ -23,7 +23,7 @@ use iroh::{
 use iroh_gossip::{Gossip, TopicId};
 use iroh_tickets::endpoint::EndpointTicket;
 
-use crate::multisig::MultiSigCommon;
+use crate::SignerArgs;
 
 /// Creates a deterministic gossip topic ID from a multi-sig address.
 ///
@@ -139,8 +139,8 @@ pub async fn start_gossip(
 /// - No matching Ledger key found in first 10 paths
 /// - No signer source provided
 pub async fn find_signer(
-    cmd: &MultiSigCommon,
-    searching_for: &[Address],
+    cmd: &SignerArgs,
+    filter_by: Option<&[Address]>,
 ) -> anyhow::Result<Box<dyn Signer + Send + Sync + 'static>> {
     if let Some(key) = cmd.private_key.as_ref() {
         Ok(Box::new(PrivateKeySigner::from_str(key)?) as Box<_>)
@@ -164,7 +164,11 @@ pub async fn find_signer(
             if let Ok(ledger) =
                 LedgerSigner::new(signers::ledger::HDPath::LedgerLive(i), Some(1)).await
             {
-                if searching_for.contains(&ledger.address()) {
+                if let Some(filter_by) = filter_by {
+                    if filter_by.contains(&ledger.address()) {
+                        return Ok(Box::new(ledger) as Box<_>);
+                    }
+                } else {
                     return Ok(Box::new(ledger) as Box<_>);
                 }
             }

@@ -15,8 +15,8 @@ use serde::Serialize;
 use crate::hypercore::{
     ARBITRUM_TESTNET_CHAIN_ID, Chain,
     raw::{
-        Action, ActionRequest, MultiSigAction, MultiSigPayload, SendAssetAction, SpotSendAction,
-        UsdSendAction,
+        Action, ActionRequest, ApproveAgent, MultiSigAction, MultiSigPayload, SendAssetAction,
+        SpotSendAction, UsdSendAction,
     },
     types::{
         BatchCancel, BatchCancelCloid, BatchModify, BatchOrder, CORE_MAINNET_EIP712_DOMAIN,
@@ -437,9 +437,9 @@ impl Signable for UsdSendAction {
         nonce: u64,
         _maybe_vault_address: Option<Address>,
         _maybe_expires_after: Option<DateTime<Utc>>,
-        _chain: Chain,
+        chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = get_typed_data::<solidity::UsdSend>(&self, None);
+        let typed_data = get_typed_data::<solidity::UsdSend>(&self, chain, None);
         sign_eip712_sync(signer, Action::UsdSend(self), typed_data, nonce)
     }
 
@@ -449,9 +449,9 @@ impl Signable for UsdSendAction {
         nonce: u64,
         _maybe_vault_address: Option<Address>,
         _maybe_expires_after: Option<DateTime<Utc>>,
-        _chain: Chain,
+        chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = get_typed_data::<solidity::UsdSend>(&self, None);
+        let typed_data = get_typed_data::<solidity::UsdSend>(&self, chain, None);
         sign_eip712(signer, Action::UsdSend(self), typed_data, nonce).await
     }
 }
@@ -463,9 +463,9 @@ impl Signable for SendAssetAction {
         nonce: u64,
         _maybe_vault_address: Option<Address>,
         _maybe_expires_after: Option<DateTime<Utc>>,
-        _chain: Chain,
+        chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = get_typed_data::<solidity::SendAsset>(&self, None);
+        let typed_data = get_typed_data::<solidity::SendAsset>(&self, chain, None);
         sign_eip712_sync(signer, Action::SendAsset(self), typed_data, nonce)
     }
 
@@ -475,9 +475,9 @@ impl Signable for SendAssetAction {
         nonce: u64,
         _maybe_vault_address: Option<Address>,
         _maybe_expires_after: Option<DateTime<Utc>>,
-        _chain: Chain,
+        chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = get_typed_data::<solidity::SendAsset>(&self, None);
+        let typed_data = get_typed_data::<solidity::SendAsset>(&self, chain, None);
         sign_eip712(signer, Action::SendAsset(self), typed_data, nonce).await
     }
 }
@@ -489,9 +489,9 @@ impl Signable for SpotSendAction {
         nonce: u64,
         _maybe_vault_address: Option<Address>,
         _maybe_expires_after: Option<DateTime<Utc>>,
-        _chain: Chain,
+        chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = get_typed_data::<solidity::SpotSend>(&self, None);
+        let typed_data = get_typed_data::<solidity::SpotSend>(&self, chain, None);
         sign_eip712_sync(signer, Action::SpotSend(self), typed_data, nonce)
     }
 
@@ -501,10 +501,36 @@ impl Signable for SpotSendAction {
         nonce: u64,
         _maybe_vault_address: Option<Address>,
         _maybe_expires_after: Option<DateTime<Utc>>,
-        _chain: Chain,
+        chain: Chain,
     ) -> Result<ActionRequest> {
-        let typed_data = get_typed_data::<solidity::SpotSend>(&self, None);
+        let typed_data = get_typed_data::<solidity::SpotSend>(&self, chain, None);
         sign_eip712(signer, Action::SpotSend(self), typed_data, nonce).await
+    }
+}
+
+impl Signable for ApproveAgent {
+    fn sign_sync<S: SignerSync>(
+        self,
+        signer: &S,
+        nonce: u64,
+        _maybe_vault_address: Option<Address>,
+        _maybe_expires_after: Option<DateTime<Utc>>,
+        chain: Chain,
+    ) -> Result<ActionRequest> {
+        let typed_data = get_typed_data::<solidity::ApproveAgent>(&self, chain, None);
+        sign_eip712_sync(signer, Action::ApproveAgent(self), typed_data, nonce)
+    }
+
+    async fn sign<S: Signer + Send + Sync>(
+        self,
+        signer: &S,
+        nonce: u64,
+        _maybe_vault_address: Option<Address>,
+        _maybe_expires_after: Option<DateTime<Utc>>,
+        chain: Chain,
+    ) -> Result<ActionRequest> {
+        let typed_data = get_typed_data::<solidity::ApproveAgent>(&self, chain, None);
+        sign_eip712(signer, Action::ApproveAgent(self), typed_data, nonce).await
     }
 }
 
@@ -715,8 +741,7 @@ pub fn multisig_lead_msg_sync<S: SignerSync>(
         nonce,
     };
 
-    let mut typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, None);
-    typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
+    let typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, chain, None);
 
     let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?.into();
 
@@ -776,9 +801,7 @@ pub async fn multisig_lead_msg<S: Signer + Send + Sync>(
         nonce,
     };
 
-    let mut typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, None);
-    typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
-
+    let typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, chain, None);
     let sig = signer.sign_dynamic_typed_data(&typed_data).await?.into();
 
     Ok(ActionRequest {
@@ -868,7 +891,7 @@ pub(super) async fn multisig_collect_signatures<'a, S: Signer + Send + Sync + 'a
 
     // Dispatch to specialized function based on action type
     let mut signatures =
-        if let Some(typed_data) = inner_action.typed_data_multisig(multi_sig_user, lead) {
+        if let Some(typed_data) = inner_action.typed_data_multisig(multi_sig_user, lead, chain) {
             // EIP-712 typed data actions (UsdSend, SpotSend, SendAsset)
             multisig_collect_eip712_signatures(signers, typed_data).await?
         } else {
@@ -912,7 +935,7 @@ async fn multisig_collect_eip712_signatures<'a, S: Signer + Send + Sync + 'a>(
 ) -> Result<Vec<Signature>> {
     // Prepare typed data once with the multisig domain
     let mut typed_data = typed_data;
-    typed_data.domain = super::types::MULTISIG_MAINNET_EIP712_DOMAIN;
+    typed_data.domain = super::types::ARBITRUM_TESTNET_EIP712_DOMAIN;
 
     let mut signatures = vec![];
     for signer in signers {
@@ -983,7 +1006,7 @@ mod tests {
             time: 1690393044548,
         };
         // Get typed data directly for UsdSend
-        let typed_data = get_typed_data::<solidity::UsdSend>(&usd_send, None);
+        let typed_data = get_typed_data::<solidity::UsdSend>(&usd_send, Chain::Mainnet, None);
         let signature = signer.sign_dynamic_typed_data_sync(&typed_data).unwrap();
 
         let expected_sig = "0xeca6267bcaadc4c0ae1aed73f5a2c45fcdbb7271f2e9356992404e5d4bad75a3572e08fe93f17755abadb7f84be7d1e9c4ce48bb5633e339bc430c672d5a20ed1b";

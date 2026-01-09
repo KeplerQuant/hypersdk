@@ -28,6 +28,14 @@ exclude = [
 ]
 
 [[example]]
+name = "approve-agent"
+path = "examples/hypercore/approve_agent.rs"
+
+[[example]]
+name = "multisig-approve-agent"
+path = "examples/hypercore/multisig_approve_agent.rs"
+
+[[example]]
 name = "websocket-candles"
 path = "examples/hypercore/websocket-candles.rs"
 

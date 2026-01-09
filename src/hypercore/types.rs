@@ -103,9 +103,9 @@ pub(super) const ARBITRUM_MAINNET_EIP712_DOMAIN: Eip712Domain = eip712_domain! {
     verifying_contract: Address::ZERO,
 };
 
-/// Domain for L1 multisig mainnet EIP‑712 signing.
-/// This domain is used when creating multisig signatures on mainnet (chainId 0x66eee = 421614).
-pub const MULTISIG_MAINNET_EIP712_DOMAIN: Eip712Domain = eip712_domain! {
+/// Domain for L1 testnet EIP‑712 signing.
+/// This domain is used when creating multisig signatures on testnet (chainId 0x66eee = 421614).
+pub const ARBITRUM_TESTNET_EIP712_DOMAIN: Eip712Domain = eip712_domain! {
     name: "HyperliquidSignTransaction",
     version: "1",
     chain_id: 421614,
@@ -1778,6 +1778,20 @@ pub struct MultiSigConfig {
     pub threshold: usize,
 }
 
+/// Extra agent information.
+///
+/// Represents an additional agent authorized to act on behalf of a user account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiAgent {
+    /// Name or identifier of the agent
+    pub name: String,
+    /// Address of the agent
+    pub address: Address,
+    /// Timestamp in milliseconds until which this agent is valid
+    pub valid_until: Option<u64>,
+}
+
 /// Signature.
 ///
 /// Represents an EIP‑712 signature split into its components.
@@ -1938,6 +1952,9 @@ pub(super) enum InfoRequest {
     UserToMultiSigSigners {
         user: Address,
     },
+    ExtraAgents {
+        user: Address,
+    },
 }
 
 /// Raw API types.
@@ -1987,7 +2004,10 @@ pub mod raw {
         /// Spot send.
         SpotSend(SpotSendAction),
         /// EVM user modify.
-        EvmUserModify { using_big_blocks: bool },
+        EvmUserModify {
+            using_big_blocks: bool,
+        },
+        ApproveAgent(ApproveAgent),
         /// Multi-sig action.
         MultiSig(MultiSigAction),
         /// Invalidate a request.
@@ -2019,19 +2039,20 @@ pub mod raw {
             &self,
             multi_sig_user: Address,
             lead: Address,
+            chain: Chain,
         ) -> Option<TypedData> {
             let multi_sig = Some((multi_sig_user, lead));
 
             match self {
                 Action::UsdSend(inner) => Some(
-                    utils::get_typed_data::<solidity::multisig::UsdSend>(inner, multi_sig),
+                    utils::get_typed_data::<solidity::multisig::UsdSend>(inner, chain, multi_sig),
                 ),
                 Action::SpotSend(inner) => Some(utils::get_typed_data::<
                     solidity::multisig::SpotSend,
-                >(inner, multi_sig)),
+                >(inner, chain, multi_sig)),
                 Action::SendAsset(inner) => Some(utils::get_typed_data::<
                     solidity::multisig::SendAsset,
-                >(inner, multi_sig)),
+                >(inner, chain, multi_sig)),
                 // All other actions use RMP signing
                 _ => None,
             }
@@ -2122,6 +2143,13 @@ pub mod raw {
                     chain,
                 ),
                 Action::SpotSend(inner) => inner.sign_sync(
+                    signer,
+                    nonce,
+                    maybe_vault_address,
+                    maybe_expires_after,
+                    chain,
+                ),
+                Action::ApproveAgent(agent) => agent.sign_sync(
                     signer,
                     nonce,
                     maybe_vault_address,
@@ -2247,6 +2275,17 @@ pub mod raw {
                         )
                         .await
                 }
+                Action::ApproveAgent(inner) => {
+                    inner
+                        .sign(
+                            signer,
+                            nonce,
+                            maybe_vault_address,
+                            maybe_expires_after,
+                            chain,
+                        )
+                        .await
+                }
                 Action::MultiSig(inner) => {
                     inner
                         .sign(
@@ -2281,7 +2320,7 @@ pub mod raw {
     ///
     /// # Fields
     ///
-    /// - `signature_chain_id`: The chain ID for signature verification (use [`super::ARBITRUM_MAINNET_CHAIN_ID`] or [`super::ARBITRUM_TESTNET_CHAIN_ID`])
+    /// - `signature_chain_id`: The chain ID for signature verification (use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`])
     /// - `hyperliquid_chain`: Whether this is mainnet or testnet
     /// - `destination`: The recipient's address
     /// - `amount`: Amount of USDC to send (in USDC, not wei)
@@ -2308,7 +2347,7 @@ pub mod raw {
     pub struct UsdSendAction {
         /// Signature chain ID.
         ///
-        /// For arbitrum use [`super::ARBITRUM_MAINNET_CHAIN_ID`] or [`super::ARBITRUM_TESTNET_CHAIN_ID`].
+        /// For arbitrum use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`].
         pub signature_chain_id: String,
         /// The chain this action is being executed on.
         pub hyperliquid_chain: Chain,
@@ -2332,7 +2371,7 @@ pub mod raw {
     ///
     /// # Fields
     ///
-    /// - `signature_chain_id`: The chain ID for signature verification (use [`super::ARBITRUM_MAINNET_CHAIN_ID`] or [`super::ARBITRUM_TESTNET_CHAIN_ID`])
+    /// - `signature_chain_id`: The chain ID for signature verification (use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`])
     /// - `hyperliquid_chain`: Whether this is mainnet or testnet
     /// - `destination`: The recipient's address
     /// - `token`: The spot token to send (wrapped in `SendToken`)
@@ -2361,7 +2400,7 @@ pub mod raw {
     pub struct SpotSendAction {
         /// Signature chain ID.
         ///
-        /// For arbitrum use [`super::ARBITRUM_MAINNET_CHAIN_ID`] or [`super::ARBITRUM_TESTNET_CHAIN_ID`].
+        /// For arbitrum use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`].
         pub signature_chain_id: String,
         /// The chain this action is being executed on.
         pub hyperliquid_chain: Chain,
@@ -2388,7 +2427,7 @@ pub mod raw {
     pub struct SendAssetAction {
         /// Signature chain ID.
         ///
-        /// For arbitrum use [`super::ARBITRUM_MAINNET_CHAIN_ID`] or [`super::ARBITRUM_TESTNET_CHAIN_ID`].
+        /// For arbitrum use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`].
         pub signature_chain_id: String,
         /// The chain this action is being executed on.
         pub hyperliquid_chain: Chain,
@@ -2409,6 +2448,33 @@ pub mod raw {
         pub amount: Decimal,
         /// From subaccount, can be empty
         pub from_sub_account: String,
+        /// Request nonce
+        pub nonce: u64,
+    }
+
+    /// Approve agent
+    ///
+    /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#approve-an-api-wallet>
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ApproveAgent {
+        /// Signature chain ID.
+        ///
+        /// For arbitrum use [`crate::hypercore::ARBITRUM_MAINNET_CHAIN_ID`] or [`crate::hypercore::ARBITRUM_TESTNET_CHAIN_ID`].
+        pub signature_chain_id: String,
+        /// The chain this action is being executed on.
+        pub hyperliquid_chain: Chain,
+        /// The agent address.
+        #[serde(
+            serialize_with = "super::utils::serialize_address_as_hex",
+            deserialize_with = "super::utils::deserialize_address_from_hex"
+        )]
+        pub agent_address: Address,
+        /// Agent name.
+        ///
+        /// An account can have 1 unnamed approved wallet,
+        /// up to 3 named ones, and 2 named agents per subaccount.
+        pub agent_name: Option<String>,
         /// Request nonce
         pub nonce: u64,
     }
@@ -2478,6 +2544,13 @@ pub(super) mod solidity {
             string token;
             string amount;
             string fromSubAccount;
+            uint64 nonce;
+        }
+
+        struct ApproveAgent {
+            string hyperliquidChain;
+            address agentAddress;
+            string agentName;
             uint64 nonce;
         }
 

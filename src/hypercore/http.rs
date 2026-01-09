@@ -56,9 +56,9 @@ use url::Url;
 
 use super::signing::*;
 use crate::hypercore::{
-    ActionError, CandleInterval, Chain, Cloid, Dex, MultiSigConfig, OidOrCloid, PerpMarket,
-    Signature, SpotMarket, SpotToken, mainnet_url,
-    raw::{Action, ActionRequest, ApiResponse, OkResponse},
+    ActionError, ApiAgent, CandleInterval, Chain, Cloid, Dex, MultiSigConfig, OidOrCloid,
+    PerpMarket, Signature, SpotMarket, SpotToken, mainnet_url,
+    raw::{Action, ActionRequest, ApiResponse, ApproveAgent, OkResponse},
     testnet_url,
     types::{
         BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder, Fill, InfoRequest,
@@ -611,6 +611,41 @@ impl Client {
         Ok(resp)
     }
 
+    /// Get API agents for a user.
+    ///
+    /// Returns a list of additional agents authorized to act on behalf of the specified user.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use hypersdk::hypercore::HttpClient;
+    /// # use alloy::primitives::address;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// # let client = HttpClient::mainnet();
+    /// let user = address!("0000000000000000000000000000000000000000");
+    /// let agents = client.api_agents(user).await?;
+    ///
+    /// for agent in agents {
+    ///     println!("Agent {}: {:?}, valid until: {}", agent.name, agent.address, agent.valid_until);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn api_agents(&self, user: Address) -> Result<Vec<ApiAgent>> {
+        let mut api_url = self.base_url.clone();
+        api_url.set_path("/info");
+
+        let resp = self
+            .http_client
+            .post(api_url)
+            .json(&InfoRequest::ExtraAgents { user })
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(resp)
+    }
+
     /// Schedule cancellation.
     pub async fn schedule_cancel<S: SignerSync>(
         &self,
@@ -792,6 +827,66 @@ impl Client {
                     err: format!("unexpected response type: {resp:?}"),
                 }),
             }
+        }
+    }
+
+    /// Approve a new agent.
+    ///
+    /// Approves an agent to act on behalf of the signer's account. An account can have:
+    /// - 1 unnamed approved wallet
+    /// - Up to 3 named agents
+    /// - 2 named agents per subaccount
+    ///
+    /// # Parameters
+    ///
+    /// - `signer`: The wallet signing the approval
+    /// - `agent`: The address of the agent to approve
+    /// - `name`: The name for the agent (or empty string for unnamed)
+    /// - `nonce`: The nonce for this action
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use hypersdk::hypercore::HttpClient;
+    /// # use alloy::primitives::address;
+    /// # use alloy_signer_local::PrivateKeySigner;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// # let client = HttpClient::mainnet();
+    /// # let signer = PrivateKeySigner::random();
+    /// let agent = address!("0x97271b6b7f3b23a2f4700ae671b05515ae5c3319");
+    /// let name = "my_agent".to_string();
+    /// let nonce = 123456789;
+    ///
+    /// client.approve_agent(&signer, agent, name, nonce).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn approve_agent<S: Signer + Send + Sync>(
+        &self,
+        signer: &S,
+        agent: Address,
+        name: String,
+        nonce: u64,
+    ) -> Result<()> {
+        let signature_chain_id = self.chain.arbitrum_id().to_owned();
+
+        let approve_agent = ApproveAgent {
+            signature_chain_id,
+            hyperliquid_chain: self.chain,
+            agent_address: agent,
+            agent_name: if name.is_empty() { None } else { Some(name) },
+            nonce,
+        };
+
+        let resp = self
+            .sign_and_send(signer, approve_agent, nonce, None, None)
+            .await?;
+        match resp {
+            ApiResponse::Ok(OkResponse::Default) => Ok(()),
+            ApiResponse::Err(err) => {
+                anyhow::bail!("approve_agent: {err}")
+            }
+            _ => anyhow::bail!("approve_agent: unexpected response type: {resp:?}"),
         }
     }
 
@@ -1588,6 +1683,66 @@ where
             ApiResponse::Ok(OkResponse::Default) => Ok(()),
             ApiResponse::Err(err) => anyhow::bail!("send_asset: {err}"),
             _ => anyhow::bail!("send_asset: unexpected response type: {resp:?}"),
+        }
+    }
+
+    /// Approve a new agent for the multisig account.
+    ///
+    /// Approves an agent to act on behalf of the multisig account. An account can have:
+    /// - 1 unnamed approved wallet
+    /// - Up to 3 named agents
+    /// - 2 named agents per subaccount
+    ///
+    /// # Parameters
+    ///
+    /// - `agent`: The address of the agent to approve
+    /// - `name`: The name for the agent (or empty string for unnamed)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let agent = address!("0x97271b6b7f3b23a2f4700ae671b05515ae5c3319");
+    /// let name = "my_agent".to_string();
+    ///
+    /// client
+    ///     .multi_sig(&lead, multisig_addr, nonce)
+    ///     .signer(&signer1)
+    ///     .signer(&signer2)
+    ///     .approve_agent(agent, name)
+    ///     .await?;
+    /// ```
+    pub async fn approve_agent(&self, agent: Address, name: String) -> Result<()> {
+        let chain = self.client.chain;
+        let signature_chain_id = chain.arbitrum_id().to_owned();
+
+        let approve_agent = ApproveAgent {
+            signature_chain_id,
+            hyperliquid_chain: chain,
+            agent_address: agent,
+            agent_name: if name.is_empty() { None } else { Some(name) },
+            nonce: self.nonce,
+        };
+
+        let action = multisig_collect_signatures(
+            self.lead.address(),
+            self.multi_sig_user,
+            self.signers.iter().copied(),
+            self.signatures.iter().copied(),
+            Action::ApproveAgent(approve_agent),
+            self.nonce,
+            self.client.chain,
+        )
+        .await?;
+
+        let resp = self
+            .client
+            .sign_and_send(self.lead, action, self.nonce, None, None)
+            .await?;
+
+        match resp {
+            ApiResponse::Ok(OkResponse::Default) => Ok(()),
+            ApiResponse::Err(err) => anyhow::bail!("approve_agent: {err}"),
+            _ => anyhow::bail!("approve_agent: unexpected response type: {resp:?}"),
         }
     }
 }

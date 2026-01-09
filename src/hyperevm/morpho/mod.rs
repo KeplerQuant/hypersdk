@@ -415,7 +415,7 @@ where
 
     /// Returns the pool's APY.
     ///
-    /// https://github.com/morpho-org/metamorpho-v1.1/blob/main/src/MetaMorphoV1_1.sol#L796
+    /// <https://github.com/morpho-org/metamorpho-v1.1/blob/main/src/MetaMorphoV1_1.sol#L796>
     pub async fn apy(&self, address: Address) -> anyhow::Result<VaultApy> {
         let meta_morpho = IMetaMorpho::new(address, self.provider.clone());
         // the vault is at the same time a token and holds balances

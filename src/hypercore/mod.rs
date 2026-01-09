@@ -93,9 +93,12 @@ use std::{
     sync::atomic::{self, AtomicU64},
 };
 
-use alloy::primitives::{B128, U256, address};
 /// Reimport signers.
 pub use alloy::signers::local::PrivateKeySigner;
+use alloy::{
+    dyn_abi::Eip712Domain,
+    primitives::{B128, U256, address},
+};
 use anyhow::Context;
 use chrono::Utc;
 use either::Either;
@@ -305,6 +308,32 @@ impl Chain {
             ARBITRUM_TESTNET_CHAIN_ID
         }
     }
+
+    /// Returns the EIP-712 domain for this chain.
+    ///
+    /// The domain is used for EIP-712 typed data signatures in cross-chain operations.
+    /// Returns the appropriate domain based on whether this is mainnet or testnet.
+    ///
+    /// # Returns
+    ///
+    /// - [`ARBITRUM_MAINNET_EIP712_DOMAIN`] for mainnet chains
+    /// - [`ARBITRUM_TESTNET_EIP712_DOMAIN`] for testnet chains
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use hypersdk::hypercore::Chain;
+    ///
+    /// let mainnet_domain = Chain::Mainnet.domain();
+    /// let testnet_domain = Chain::Testnet.domain();
+    /// ```
+    pub fn domain(&self) -> Eip712Domain {
+        if self.is_mainnet() {
+            ARBITRUM_MAINNET_EIP712_DOMAIN
+        } else {
+            ARBITRUM_TESTNET_EIP712_DOMAIN
+        }
+    }
 }
 
 /// Arbitrum One mainnet chain ID for EIP-712 signatures.
@@ -352,7 +381,7 @@ pub const ARBITRUM_MAINNET_CHAIN_ID: &str = "0xa4b1";
 ///
 /// - This is **not** the Arbitrum testnet chain ID
 /// - This is Hyperliquid's custom chain ID for testnet operations
-/// - Also used as [`MAINNET_MULTISIG_CHAIN_ID`] for multisig operations on both mainnet and testnet
+/// - Also used for multisig operations on both mainnet and testnet
 ///
 /// # Usage
 ///
@@ -371,7 +400,6 @@ pub const ARBITRUM_MAINNET_CHAIN_ID: &str = "0xa4b1";
 /// # See Also
 ///
 /// - [`ARBITRUM_MAINNET_CHAIN_ID`]: For mainnet operations
-/// - [`MAINNET_MULTISIG_CHAIN_ID`]: Same value, used for multisig operations
 /// - [`Chain::arbitrum_id()`]: Helper method to get the correct ID based on chain
 pub const ARBITRUM_TESTNET_CHAIN_ID: &str = "0x66eee";
 
@@ -823,7 +851,7 @@ pub struct SpotMarket {
     pub name: String,
     /// Market index used in API calls (10_000 + spot index)
     pub index: usize,
-    /// Base token (tokens[0]) and quote token (tokens[1])
+    /// Base token (first element) and quote token (second element)
     pub tokens: [SpotToken; 2],
     /// Price tick configuration for valid price increments
     pub table: PriceTick,

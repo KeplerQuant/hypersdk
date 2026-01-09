@@ -13,7 +13,9 @@ use alloy::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{Cloid, types::ARBITRUM_MAINNET_EIP712_DOMAIN};
+use crate::hypercore::Chain;
+
+use super::Cloid;
 
 const HYPERLIQUID_EIP_PREFIX: &str = "HyperliquidTransaction:";
 
@@ -128,6 +130,7 @@ pub(super) fn rmp_hash<T: Serialize>(
 /// * `T` - The Solidity struct type that defines the message structure
 pub(super) fn get_typed_data<T: SolStruct>(
     msg: &impl Serialize,
+    chain: Chain,
     multi_sig: Option<(Address, Address)>,
 ) -> TypedData {
     let mut resolver = Resolver::from_struct::<T>();
@@ -151,7 +154,7 @@ pub(super) fn get_typed_data<T: SolStruct>(
     types.insert(format!("{HYPERLIQUID_EIP_PREFIX}{}", T::NAME), agent_type);
 
     TypedData {
-        domain: ARBITRUM_MAINNET_EIP712_DOMAIN,
+        domain: chain.domain(),
         resolver: Resolver::from(types),
         primary_type: format!("{HYPERLIQUID_EIP_PREFIX}{}", T::NAME),
         message: msg,

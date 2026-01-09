@@ -2,7 +2,7 @@
 //!
 //! Types generated from ABI JSON files.
 //!
-//! [`Id`], [`Market`], [`MarketParams`] and [`MarketConfig`] types are created to avoid
+//! [`Id`], [`Market`], and [`MarketParams`] types are created to avoid
 //! the redundant definitions of such types.
 
 use alloy::sol;

@@ -251,6 +251,12 @@ There are examples in the `examples/` folder. We tried to cover as many cases as
 
 ## Features
 
+- [Price Tick Rounding](#price-tick-rounding)
+- [Transfers Support](#transfers-support)
+- [HIP-3: Multi-DEX Support](#hip-3-multi-dex-support)
+- [Multi-Sig Support](#multi-sig-support)
+- [Signature Recovery](#signature-recovery)
+
 ### Price Tick Rounding
 
 The SDK includes accurate price tick size calculation for both spot and perpetual markets:
@@ -369,6 +375,33 @@ client
     .signer(&signer1)            // Can still add more signers
     .place(order, None, None)
     .await?;
+```
+
+### Signature Recovery
+
+Recover the signer's address from any signed action:
+
+```rust
+use hypersdk::hypercore::{self, types::*, PrivateKeySigner, Chain};
+
+let signer: PrivateKeySigner = "your_private_key".parse()?;
+let nonce = chrono::Utc::now().timestamp_millis() as u64;
+
+// Sign an action
+let order = BatchOrder { /* ... */ };
+let action = Action::Order(order.clone());
+let signed = action.sign_sync(&signer, nonce, None, None, Chain::Mainnet)?;
+
+// Recover the address
+let recovered = Action::Order(order).recover(
+    &signed.signature,
+    nonce,
+    None,
+    None,
+    Chain::Mainnet
+)?;
+
+assert_eq!(recovered, signer.address());
 ```
 
 ## Configuration

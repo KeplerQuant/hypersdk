@@ -57,12 +57,12 @@ use url::Url;
 use super::signing::*;
 use crate::hypercore::{
     ActionError, ApiAgent, CandleInterval, Chain, Cloid, Dex, MultiSigConfig, OidOrCloid,
-    PerpMarket, Signature, SpotMarket, SpotToken, mainnet_url,
-    raw::{
-        Action, ActionRequest, ApiResponse, ApproveAgent, ConvertToMultiSigUser, OkResponse,
+    PerpMarket, Signature, SpotMarket, SpotToken,
+    api::{
+        Action, ActionRequest, ApproveAgent, ConvertToMultiSigUser, OkResponse, Response,
         SignersConfig,
     },
-    testnet_url,
+    mainnet_url, testnet_url,
     types::{
         BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder, Fill, InfoRequest,
         OrderResponseStatus, OrderUpdate, ScheduleCancel, SendAsset, SendToken, SpotSend, UsdSend,
@@ -570,12 +570,6 @@ impl Client {
     ///
     /// * `user` - The address of the multisig account to query
     ///
-    /// # Returns
-    ///
-    /// Returns a [`MultiSigConfig`] containing:
-    /// - `authorized_users`: Addresses authorized to sign for this multisig
-    /// - `threshold`: Minimum number of signatures required to execute transactions
-    ///
     /// # Example
     ///
     /// ```no_run
@@ -672,8 +666,8 @@ impl Client {
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => {
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => {
                 anyhow::bail!("schedule_cancel: {err}")
             }
             _ => anyhow::bail!("schedule_cancel: unexpected response type: {resp:?}"),
@@ -691,10 +685,6 @@ impl Client {
     /// - `nonce`: Unique nonce (typically current timestamp in milliseconds)
     /// - `vault_address`: Optional vault address if trading on behalf of a vault
     /// - `expires_after`: Optional expiration timestamp for the request
-    ///
-    /// # Returns
-    ///
-    /// A future that resolves to order statuses or an error.
     ///
     /// # Example
     ///
@@ -731,8 +721,8 @@ impl Client {
             })?;
 
             match resp {
-                ApiResponse::Ok(OkResponse::Order { statuses }) => Ok(statuses),
-                ApiResponse::Err(err) => Err(ActionError { ids: cloids, err }),
+                Response::Ok(OkResponse::Order { statuses }) => Ok(statuses),
+                Response::Err(err) => Err(ActionError { ids: cloids, err }),
                 _ => Err(ActionError {
                     ids: cloids,
                     err: format!("unexpected response type: {resp:?}"),
@@ -762,8 +752,8 @@ impl Client {
             })?;
 
             match resp {
-                ApiResponse::Ok(OkResponse::Order { statuses }) => Ok(statuses),
-                ApiResponse::Err(err) => Err(ActionError { ids: oids, err }),
+                Response::Ok(OkResponse::Order { statuses }) => Ok(statuses),
+                Response::Err(err) => Err(ActionError { ids: oids, err }),
                 _ => Err(ActionError {
                     ids: oids,
                     err: format!("unexpected response type: {resp:?}"),
@@ -793,8 +783,8 @@ impl Client {
             })?;
 
             match resp {
-                ApiResponse::Ok(OkResponse::Order { statuses }) => Ok(statuses),
-                ApiResponse::Err(err) => Err(ActionError { ids: cloids, err }),
+                Response::Ok(OkResponse::Order { statuses }) => Ok(statuses),
+                Response::Err(err) => Err(ActionError { ids: cloids, err }),
                 _ => Err(ActionError {
                     ids: cloids,
                     err: format!("unexpected response type: {resp:?}"),
@@ -824,8 +814,8 @@ impl Client {
             })?;
 
             match resp {
-                ApiResponse::Ok(OkResponse::Order { statuses }) => Ok(statuses),
-                ApiResponse::Err(err) => Err(ActionError { ids: cloids, err }),
+                Response::Ok(OkResponse::Order { statuses }) => Ok(statuses),
+                Response::Err(err) => Err(ActionError { ids: cloids, err }),
                 _ => Err(ActionError {
                     ids: cloids,
                     err: format!("unexpected response type: {resp:?}"),
@@ -887,8 +877,8 @@ impl Client {
             .sign_and_send(signer, approve_agent, nonce, None, None)
             .await?;
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => {
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => {
                 anyhow::bail!("approve_agent: {err}")
             }
             _ => anyhow::bail!("approve_agent: unexpected response type: {resp:?}"),
@@ -955,8 +945,8 @@ impl Client {
             .sign_and_send(signer, convert, nonce, None, None)
             .await?;
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => {
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => {
                 anyhow::bail!("convert_to_multisig: {err}")
             }
             _ => anyhow::bail!("convert_to_multisig: unexpected response type: {resp:?}"),
@@ -1069,8 +1059,8 @@ impl Client {
             .sign_and_send_sync(signer, send.into_action(self.chain), nonce, None, None)
             .await?;
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => {
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => {
                 anyhow::bail!("send_usdc: {err}")
             }
             _ => anyhow::bail!("send_usdc: unexpected response type: {resp:?}"),
@@ -1094,8 +1084,8 @@ impl Client {
         async move {
             let resp = future.await?;
             match resp {
-                ApiResponse::Ok(OkResponse::Default) => Ok(()),
-                ApiResponse::Err(err) => {
+                Response::Ok(OkResponse::Default) => Ok(()),
+                Response::Err(err) => {
                     anyhow::bail!("send_asset: {err}")
                 }
                 _ => anyhow::bail!("send_asset: unexpected response type: {resp:?}"),
@@ -1120,8 +1110,8 @@ impl Client {
         async move {
             let resp = future.await?;
             match resp {
-                ApiResponse::Ok(OkResponse::Default) => Ok(()),
-                ApiResponse::Err(err) => {
+                Response::Ok(OkResponse::Default) => Ok(()),
+                Response::Err(err) => {
                     anyhow::bail!("spot send: {err}")
                 }
                 _ => anyhow::bail!("spot_send: unexpected response type: {resp:?}"),
@@ -1151,8 +1141,8 @@ impl Client {
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => {
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => {
                 anyhow::bail!("evm_user_modify: {err}")
             }
             _ => anyhow::bail!("evm_user_modify: unexpected response type: {resp:?}"),
@@ -1172,8 +1162,8 @@ impl Client {
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => {
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => {
                 anyhow::bail!("noop: {err}")
             }
             _ => anyhow::bail!("noop: unexpected response type: {resp:?}"),
@@ -1202,10 +1192,6 @@ impl Client {
     /// 4. The lead signer signs the entire multisig payload
     /// 5. The signed multisig transaction is submitted to the exchange
     /// 6. The exchange verifies all signatures match the multisig wallet's authorized signers
-    ///
-    /// # Returns
-    ///
-    /// Returns the API response containing the result of the action execution.
     ///
     /// # Example
     ///
@@ -1255,7 +1241,7 @@ impl Client {
         nonce: u64,
         maybe_vault_address: Option<Address>,
         maybe_expires_after: Option<DateTime<Utc>>,
-    ) -> impl Future<Output = Result<ApiResponse>> + Send + 'static {
+    ) -> impl Future<Output = Result<Response>> + Send + 'static {
         let action: Action = action.into();
         let res = action.sign_sync(
             signer,
@@ -1293,7 +1279,7 @@ impl Client {
         nonce: u64,
         maybe_vault_address: Option<Address>,
         maybe_expires_after: Option<DateTime<Utc>>,
-    ) -> Result<ApiResponse> {
+    ) -> Result<Response> {
         let action: Action = action.into();
         let req = action
             .sign(
@@ -1309,7 +1295,7 @@ impl Client {
     }
 
     #[doc(hidden)]
-    pub async fn send(&self, req: ActionRequest) -> Result<ApiResponse> {
+    pub async fn send(&self, req: ActionRequest) -> Result<Response> {
         let http_client = self.http_client.clone();
         let mut url = self.base_url.clone();
         url.set_path("/exchange");
@@ -1399,10 +1385,6 @@ where
     ///
     /// - `signer`: A reference to the signer to add
     ///
-    /// # Returns
-    ///
-    /// Returns `self` for method chaining.
-    ///
     /// # Example
     ///
     /// ```rust,ignore
@@ -1427,10 +1409,6 @@ where
     /// # Parameters
     ///
     /// - `signers`: An iterable collection of signer references
-    ///
-    /// # Returns
-    ///
-    /// Returns `self` for method chaining.
     ///
     /// # Example
     ///
@@ -1462,10 +1440,6 @@ where
     /// # Parameters
     ///
     /// - `signatures`: An iterable collection of pre-existing signatures
-    ///
-    /// # Returns
-    ///
-    /// Returns `self` for method chaining.
     ///
     /// # Example
     ///
@@ -1513,11 +1487,6 @@ where
     /// - `batch`: The batch order to place
     /// - `vault_address`: Optional vault address if trading on behalf of a vault
     /// - `expires_after`: Optional expiration time for the request
-    ///
-    /// # Returns
-    ///
-    /// A future that resolves to a vector of `OrderResponseStatus` for each order in the batch,
-    /// or an `ActionError` containing the failed order CLOIDs and error message.
     ///
     /// # Example
     ///
@@ -1593,8 +1562,8 @@ where
             })?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Order { statuses }) => Ok(statuses),
-            ApiResponse::Err(err) => Err(ActionError { ids: cloids, err }),
+            Response::Ok(OkResponse::Order { statuses }) => Ok(statuses),
+            Response::Err(err) => Err(ActionError { ids: cloids, err }),
             _ => Err(ActionError {
                 ids: cloids,
                 err: format!("unexpected response type: {resp:?}"),
@@ -1617,10 +1586,6 @@ where
     /// # Parameters
     ///
     /// - `send`: The UsdSend parameters (destination, amount, time, chain, etc.)
-    ///
-    /// # Returns
-    ///
-    /// A future that resolves to `Ok(())` on success or an error on failure.
     ///
     /// # Example
     ///
@@ -1671,8 +1636,8 @@ where
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => anyhow::bail!("send_usdc: {err}"),
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => anyhow::bail!("send_usdc: {err}"),
             _ => anyhow::bail!("send_usdc: unexpected response type: {resp:?}"),
         }
     }
@@ -1693,10 +1658,6 @@ where
     /// # Parameters
     ///
     /// - `send`: The SendAsset parameters (destination, token, amount, source/dest DEX, etc.)
-    ///
-    /// # Returns
-    ///
-    /// A future that resolves to `Ok(())` on success or an error on failure.
     ///
     /// # Example
     ///
@@ -1755,8 +1716,8 @@ where
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => anyhow::bail!("send_asset: {err}"),
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => anyhow::bail!("send_asset: {err}"),
             _ => anyhow::bail!("send_asset: unexpected response type: {resp:?}"),
         }
     }
@@ -1815,8 +1776,8 @@ where
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => anyhow::bail!("approve_agent: {err}"),
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => anyhow::bail!("approve_agent: {err}"),
             _ => anyhow::bail!("approve_agent: unexpected response type: {resp:?}"),
         }
     }
@@ -1867,8 +1828,8 @@ where
             .await?;
 
         match resp {
-            ApiResponse::Ok(OkResponse::Default) => Ok(()),
-            ApiResponse::Err(err) => anyhow::bail!("convert_to_normal_user: {err}"),
+            Response::Ok(OkResponse::Default) => Ok(()),
+            Response::Err(err) => anyhow::bail!("convert_to_normal_user: {err}"),
             _ => anyhow::bail!("convert_to_normal_user: unexpected response type: {resp:?}"),
         }
     }

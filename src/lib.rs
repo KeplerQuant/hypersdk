@@ -14,6 +14,7 @@
 //! | [`hypercore::http`] | HTTP API client | Account queries, order placement |
 //! | [`hypercore::ws`] | WebSocket streaming | Real-time market data, order updates |
 //! | [`hypercore::types`] | Core type definitions | Orders, trades, candles, subscriptions |
+//! | [`hypercore::signing`] | Signature utilities | Sign actions, recover addresses |
 //! | [`hyperevm::morpho`] | Morpho lending | Query APY, lending positions |
 //! | [`hyperevm::uniswap`] | Uniswap V3 | Pool prices, liquidity positions |
 //!

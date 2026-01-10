@@ -18,7 +18,7 @@ use serde::Serialize;
 
 use crate::hypercore::{
     Chain,
-    raw::{Action, MultiSigAction, MultiSigPayload},
+    api::{Action, MultiSigAction, MultiSigPayload},
     types::{CORE_MAINNET_EIP712_DOMAIN, Signature, solidity},
     utils::{get_typed_data, rmp_hash},
 };
@@ -28,7 +28,7 @@ use crate::hypercore::{
 /// This is used for RMP-based actions where the signature is over an Agent wrapper
 /// containing the RMP hash as the connection ID.
 #[inline(always)]
-pub(super) fn agent_signing_hash(chain: Chain, connection_id: B256) -> B256 {
+pub fn agent_signing_hash(chain: Chain, connection_id: B256) -> B256 {
     use alloy::sol_types::SolStruct;
     let agent = solidity::Agent {
         source: if chain.is_mainnet() { "a" } else { "b" }.to_string(),
@@ -39,7 +39,7 @@ pub(super) fn agent_signing_hash(chain: Chain, connection_id: B256) -> B256 {
 
 /// Signs an L1 action with EIP-712 (asynchronous version).
 #[inline(always)]
-async fn sign_l1_action<S: Signer + Send + Sync>(
+pub async fn sign_l1_action<S: Signer + Send + Sync>(
     signer: &S,
     chain: Chain,
     connection_id: B256,
@@ -59,7 +59,6 @@ async fn sign_l1_action<S: Signer + Send + Sync>(
 /// Signs a multisig action for submission to the exchange (synchronous).
 ///
 /// This function creates the final signature that wraps all the collected multisig signatures.
-#[doc(hidden)]
 pub fn multisig_lead_msg_sync<S: SignerSync>(
     signer: &S,
     action: MultiSigAction,
@@ -67,7 +66,7 @@ pub fn multisig_lead_msg_sync<S: SignerSync>(
     maybe_vault_address: Option<Address>,
     maybe_expires_after: Option<DateTime<Utc>>,
     chain: Chain,
-) -> Result<crate::hypercore::raw::ActionRequest> {
+) -> Result<crate::hypercore::api::ActionRequest> {
     let expires_after = maybe_expires_after.map(|after| after.timestamp_millis() as u64);
     let multsig_hash = rmp_hash(&action, nonce, maybe_vault_address, expires_after)?;
 
@@ -88,7 +87,7 @@ pub fn multisig_lead_msg_sync<S: SignerSync>(
     let typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, chain, None);
     let sig = signer.sign_dynamic_typed_data_sync(&typed_data)?.into();
 
-    Ok(crate::hypercore::raw::ActionRequest {
+    Ok(crate::hypercore::api::ActionRequest {
         signature: sig,
         action: Action::MultiSig(action),
         nonce,
@@ -100,7 +99,6 @@ pub fn multisig_lead_msg_sync<S: SignerSync>(
 /// Signs a multisig action for submission to the exchange (asynchronous).
 ///
 /// This function creates the final signature that wraps all the collected multisig signatures.
-#[doc(hidden)]
 pub async fn multisig_lead_msg<S: Signer + Send + Sync>(
     signer: &S,
     action: MultiSigAction,
@@ -108,7 +106,7 @@ pub async fn multisig_lead_msg<S: Signer + Send + Sync>(
     maybe_vault_address: Option<Address>,
     maybe_expires_after: Option<DateTime<Utc>>,
     chain: Chain,
-) -> Result<crate::hypercore::raw::ActionRequest> {
+) -> Result<crate::hypercore::api::ActionRequest> {
     let expires_after = maybe_expires_after.map(|after| after.timestamp_millis() as u64);
     let multsig_hash = rmp_hash(&action, nonce, maybe_vault_address, expires_after)?;
 
@@ -129,7 +127,7 @@ pub async fn multisig_lead_msg<S: Signer + Send + Sync>(
     let typed_data = get_typed_data::<solidity::SendMultiSig>(&envelope, chain, None);
     let sig = signer.sign_dynamic_typed_data(&typed_data).await?.into();
 
-    Ok(crate::hypercore::raw::ActionRequest {
+    Ok(crate::hypercore::api::ActionRequest {
         signature: sig,
         action: Action::MultiSig(action),
         nonce,
@@ -141,7 +139,6 @@ pub async fn multisig_lead_msg<S: Signer + Send + Sync>(
 /// Collects signatures from all signers for a multisig action, with support for appending pre-existing signatures.
 ///
 /// This function implements the Hyperliquid multisig signature collection protocol.
-#[doc(hidden)]
 pub async fn multisig_collect_signatures<'a, S: Signer + Send + Sync + 'a>(
     lead: Address,
     multi_sig_user: Address,
@@ -236,7 +233,7 @@ mod tests {
     fn test_sign_usd_transfer_action() {
         let signer = get_signer();
 
-        let usd_send = types::raw::UsdSendAction {
+        let usd_send = types::api::UsdSendAction {
             signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID.to_owned(),
             hyperliquid_chain: Chain::Mainnet,
             destination: "0x0D1d9635D0640821d15e323ac8AdADfA9c111414"
@@ -261,7 +258,7 @@ mod tests {
         let signer = get_signer();
         let expected_address = signer.address();
 
-        let usd_send = types::raw::UsdSendAction {
+        let usd_send = types::api::UsdSendAction {
             signature_chain_id: ARBITRUM_MAINNET_CHAIN_ID.to_owned(),
             hyperliquid_chain: Chain::Mainnet,
             destination: "0x0D1d9635D0640821d15e323ac8AdADfA9c111414"

@@ -64,7 +64,7 @@ where
 ///
 /// When converting a multisig user back to a normal user, the signers field should be "null".
 pub(super) fn serialize_signers_as_json<S>(
-    value: &super::types::raw::SignersConfig,
+    value: &super::types::api::SignersConfig,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -80,7 +80,7 @@ where
 
 pub(super) fn deserialize_signers_as_json<'de, D>(
     deserializer: D,
-) -> Result<super::types::raw::SignersConfig, D::Error>
+) -> Result<super::types::api::SignersConfig, D::Error>
 where
     D: Deserializer<'de>,
 {

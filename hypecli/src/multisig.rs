@@ -10,7 +10,7 @@ use hypersdk::{
     Address, Decimal,
     hypercore::{
         self, HttpClient, NonceHandler, SendAsset, SendToken, Signature,
-        raw::{
+        api::{
             self, Action, ConvertToMultiSigUser, MultiSigAction, MultiSigPayload, SignersConfig,
         },
     },
@@ -260,7 +260,7 @@ async fn convert_to_normal_user(cmd: MultiSigConvertToNormalUser) -> anyhow::Res
     let action = Action::ConvertToMultiSigUser(ConvertToMultiSigUser {
         signature_chain_id: cmd.chain.arbitrum_id().to_owned(),
         hyperliquid_chain: cmd.chain,
-        signers: hypersdk::hypercore::raw::SignersConfig {
+        signers: hypersdk::hypercore::api::SignersConfig {
             authorized_users: vec![], // Empty to convert to normal user
             threshold: 0,
         },
@@ -442,10 +442,10 @@ async fn execute_multisig_action(
     .await?;
 
     match hl.send(req).await? {
-        raw::ApiResponse::Ok(_) => {
+        api::ApiResponse::Ok(_) => {
             println!("Success");
         }
-        raw::ApiResponse::Err(err) => {
+        api::ApiResponse::Err(err) => {
             println!("error: {err}");
         }
     }

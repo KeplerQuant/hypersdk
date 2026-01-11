@@ -19,8 +19,8 @@ include = [
   "Cargo.toml"
 ]
 
-# [patch.crates-io]
-# hypersdk = { path = ".." }
+[patch.crates-io]
+hypersdk = { path = ".." }
 
 [dependencies]
 hypersdk = { version = "0.1.4" }
@@ -48,3 +48,4 @@ derive_more = { version = "2.1.1", features = ["deref"] }
 rpassword = "7.4.0"
 indicatif = "0.18.3"
 bytes = "1.11.0"
+rust_decimal = { version = "1.39.0", default-features = false, features = ["std"] }

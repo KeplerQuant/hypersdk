@@ -77,7 +77,9 @@ async fn main() -> anyhow::Result<()> {
 
     let provider = DynProvider::new(hyperevm::mainnet_with_url(&args.rpc_url).await?);
     let morpho = hyperevm::morpho::Client::new(provider.clone());
-    let apy = morpho.apy(args.contract_address, args.market_id).await?;
+    let apy = morpho
+        .apy::<f64, _>(args.contract_address, args.market_id, |e| e.exp())
+        .await?;
 
     let last_update =
         chrono::DateTime::<Utc>::from_timestamp_secs(apy.market.lastUpdate as i64).unwrap();

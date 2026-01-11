@@ -134,8 +134,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 ## Runtime dependencies
 [dependencies]
-alloy = { version = "1.1.1", default-features = false, features = ["contract", "eip712", "getrandom", "providers", "reqwest", "reqwest-rustls-tls", "rpc", "rpc-types", "signer-local", "signers", "sol-types"] }
-anyhow = "1.0.100"
+alloy = { version = "1.1", default-features = false, features = ["contract", "eip712", "getrandom", "providers", "reqwest", "reqwest-rustls-tls", "rpc", "rpc-types", "signer-local", "signers", "sol-types"] }
+anyhow = "1"
 const-hex = { version = "1.17", features = ["serde"] }
 derive_more = { version = "2", features = ["display", "is_variant"] }
 either = { version = "1", features = ["serde"] }
@@ -151,7 +151,8 @@ tokio = { version = "1", default-features = false, features = ["test-util", "tim
 url = "2"
 yawc = { version = "0.2", features = ["json", "logging", "simd"] }
 hex-literal = "0.4"
-chrono = { version = "0.4.42", features = ["now"] }
+chrono = { version = "0.4", features = ["now"] }
+num-traits = "0.2"
 
 ## Development and test dependencies
 [dev-dependencies]

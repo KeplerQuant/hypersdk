@@ -46,9 +46,10 @@ use alloy::{primitives::FixedBytes, providers::Provider};
 use chrono::Utc;
 use clap::Parser;
 use hypersdk::{
-    Address,
+    Address, Decimal,
     hyperevm::{self, DynProvider, ERC20},
 };
+use rust_decimal::MathematicalOps;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -76,7 +77,9 @@ async fn main() -> anyhow::Result<()> {
 
     let provider = DynProvider::new(hyperevm::mainnet_with_url(&args.rpc_url).await?);
     let morpho = hyperevm::morpho::Client::new(provider.clone());
-    let apy = morpho.apy(args.contract_address, args.market_id).await?;
+    let apy = morpho
+        .apy::<Decimal, _>(args.contract_address, args.market_id, |e| e.exp())
+        .await?;
 
     let last_update =
         chrono::DateTime::<Utc>::from_timestamp_secs(apy.market.lastUpdate as i64).unwrap();
@@ -92,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!(
         "borrow APY for {loan} / {collateral} is {}",
-        apy.borrow * 100.0
+        apy.borrow * Decimal::ONE_HUNDRED
     );
 
     Ok(())

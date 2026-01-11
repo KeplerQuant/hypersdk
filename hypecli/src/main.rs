@@ -9,7 +9,7 @@ use balances::SpotBalancesCmd;
 use clap::{Args, Parser};
 use hypersdk::hypercore::Chain;
 use markets::{PerpsCmd, SpotCmd};
-use morpho::MorphoPositionCmd;
+use morpho::{MorphoApyCmd, MorphoPositionCmd, MorphoVaultApyCmd};
 use multisig::MultiSigCmd;
 use to_multisig::ToMultiSigCmd;
 
@@ -28,6 +28,10 @@ enum Cli {
     SpotBalances(SpotBalancesCmd),
     /// Query an addresses' morpho balance
     MorphoPosition(MorphoPositionCmd),
+    /// Query APY for a Morpho market
+    MorphoApy(MorphoApyCmd),
+    /// Query APY for a MetaMorpho vault
+    MorphoVaultApy(MorphoVaultApyCmd),
     /// Multi-sig commands
     #[command(subcommand)]
     Multisig(MultiSigCmd),
@@ -42,6 +46,8 @@ impl Cli {
             Self::Spot(cmd) => cmd.run().await,
             Self::SpotBalances(cmd) => cmd.run().await,
             Self::MorphoPosition(cmd) => cmd.run().await,
+            Self::MorphoApy(cmd) => cmd.run().await,
+            Self::MorphoVaultApy(cmd) => cmd.run().await,
             Self::Multisig(cmd) => cmd.run().await,
             Self::ToMultisig(cmd) => cmd.run().await,
         }

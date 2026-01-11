@@ -75,12 +75,11 @@ async fn main() -> anyhow::Result<()> {
     println!("Connecting to RPC endpoint: {}", args.rpc_url);
 
     let provider = DynProvider::new(hyperevm::mainnet_with_url(&args.rpc_url).await?);
-    let vault = MetaClient::new(provider).apy(args.contract_address).await?;
+    let vault = MetaClient::new(provider)
+        .apy::<f64, _>(args.contract_address, |e| e.exp())
+        .await?;
 
-    println!(
-        "apy: {}%",
-        vault.apy(|v| v.to::<i128>() as f64 / 1e18) * 100.0
-    );
+    println!("apy: {}%", vault.apy(|v| v.to::<i128>() as f64) * 100.0);
 
     Ok(())
 }

@@ -31,7 +31,7 @@
 //! let morpho_addr: Address = "0x...".parse()?;
 //! let market_id = [0u8; 32].into();
 //!
-//! let apy = client.apy(morpho_addr, market_id).await?;
+//! let apy = client.apy::<f64, _>(morpho_addr, market_id, |e| e.exp()).await?;
 //! println!("Borrow APY: {:.2}%", apy.borrow * 100.0);
 //! println!("Supply APY: {:.2}%", apy.supply * 100.0);
 //! # Ok(())
@@ -42,27 +42,26 @@
 //!
 //! ```no_run
 //! use hypersdk::hyperevm::morpho;
-//! use hypersdk::Address;
+//! use hypersdk::{U256, Address};
 //!
 //! # async fn example() -> anyhow::Result<()> {
 //! let client = morpho::MetaClient::mainnet().await?;
 //!
 //! let vault_addr: Address = "0x...".parse()?;
-//! let vault_apy = client.apy(vault_addr).await?;
+//! let vault_apy = client.apy::<f64, _>(vault_addr, |e| e.exp()).await?;
 //!
-//! println!("Vault APY: {:.2}%", vault_apy.apy() * 100.0);
-//! println!("Fee: {:.2}%", vault_apy.fee * 100.0);
+//! println!("Vault APY: {:.2}%", vault_apy.apy::<f64, _>(|v| v.to::<u128>() as f64 / 1e18) * 100.0);
+//! println!("Fee: {:.2}%", vault_apy.fee * U256::from(100));
 //! # Ok(())
 //! # }
 //! ```
-
-use std::ops::{Add, Div, Mul, Sub};
 
 use alloy::{
     primitives::{Address, FixedBytes, U256},
     providers::Provider,
     transports::TransportError,
 };
+use num_traits::{FromPrimitive, NumOps, One, ToPrimitive};
 
 use crate::hyperevm::{
     DynProvider, ERC20,
@@ -90,15 +89,15 @@ pub type MarketId = FixedBytes<32>;
 /// Query APY for a market: `client.apy(morpho_addr, market_id).await?`
 /// Access borrow and supply APY via `apy.borrow` and `apy.supply` fields.
 #[derive(Debug, Clone)]
-pub struct PoolApy {
+pub struct PoolApy<T128> {
     /// Market parameters (loan token, collateral, oracle, IRM, LLTV)
     pub params: MarketParams,
     /// Current market state (supply, borrow, fees)
     pub market: Market,
     /// Borrow APY as a decimal (0.05 = 5%)
-    pub borrow: f64,
+    pub borrow: T128,
     /// Supply APY as a decimal (0.03 = 3%)
-    pub supply: f64,
+    pub supply: T128,
 }
 
 /// MetaMorpho vault APY information.
@@ -112,9 +111,9 @@ pub struct PoolApy {
 /// Calculate effective APY after fees using `vault_apy.apy()` method.
 /// Individual market data available in `vault_apy.components`.
 #[derive(Debug, Clone)]
-pub struct VaultApy {
+pub struct VaultApy<T128> {
     /// Individual markets that compose this vault
-    pub components: Vec<VaultSupply>,
+    pub components: Vec<VaultSupply<T128>>,
     /// Vault management fee (raw U256 value, divide by 1e18)
     pub fee: U256,
     /// Total assets deposited into the vault (raw U256 value)
@@ -122,18 +121,25 @@ pub struct VaultApy {
 }
 
 #[derive(Debug, Clone)]
-pub struct VaultSupply {
+pub struct VaultSupply<T128> {
     pub supplied_shares: U256,
-    pub pool: PoolApy,
+    pub pool: PoolApy<T128>,
     /// Supply APY as U256 (scaled by 1e18, e.g., 0.05 * 1e18 = 5% APY)
-    pub supply_apy: U256,
+    pub supply_apy: T128,
 }
 
-impl VaultApy {
+impl<T128> VaultApy<T128>
+where
+    T128: ToPrimitive,
+{
     /// Calculates the effective vault APY after fees.
     ///
     /// This is a weighted average of all underlying market APYs, adjusted for
     /// the vault's management fee.
+    ///
+    /// The return value is scaled to 18 decimals. Which means, if the
+    /// APY of a vault is 4.20% the string representation of your decimal
+    /// implementation should be close to `0.042`.
     ///
     /// # Type Parameters
     ///
@@ -145,10 +151,6 @@ impl VaultApy {
     ///
     /// - `convert`: Function to convert U256 values to your numeric type
     ///
-    /// # Returns
-    ///
-    /// The APY in your chosen numeric type.
-    ///
     /// # Example
     ///
     /// ```no_run
@@ -158,7 +160,7 @@ impl VaultApy {
     /// # async fn example() -> anyhow::Result<()> {
     /// let client = morpho::MetaClient::mainnet().await?;
     /// let vault_addr: Address = "0x...".parse()?;
-    /// let vault_apy = client.apy(vault_addr).await?;
+    /// let vault_apy = client.apy::<f64, _>(vault_addr, |value| value.exp()).await?;
     ///
     /// // Using f64
     /// let apy_f64 = vault_apy.apy(|u| u.to::<u128>() as f64);
@@ -169,21 +171,21 @@ impl VaultApy {
     /// # }
     /// ```
     #[must_use]
-    pub fn apy<T, F>(&self, convert: F) -> T
+    pub fn apy<T256, F>(&self, convert: F) -> T256
     where
-        T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T> + Copy,
-        F: Fn(U256) -> T,
+        T256: NumOps + Copy,
+        F: Fn(U256) -> T256,
     {
         let zero = convert(U256::ZERO);
         let million = convert(U256::from(1_000_000u128));
-        let wad = convert(U256::from(1_000_000_000_000_000_000u128)); // 1e18
+        let wad = convert(U256::from(1_000_000_000_000_000_000u128));
 
         if self.total_deposits.is_zero() {
             return zero;
         }
 
-        let total_deposits = convert(self.total_deposits);
-        let fee = convert(self.fee);
+        let total_deposits = convert(self.total_deposits) / wad;
+        let fee = convert(self.fee) / wad;
 
         // Calculate fee as decimal: 1 - (fee / 1e18)
         let fee_multiplier = wad - fee;
@@ -192,12 +194,12 @@ impl VaultApy {
             .components
             .iter()
             .map(|component| {
-                let supplied_shares = convert(component.supplied_shares) / million;
+                // scale all the values using `wad`
+                let supplied_shares = convert(component.supplied_shares) / wad / million;
                 let total_supply_assets =
-                    convert(U256::from(component.pool.market.totalSupplyAssets));
+                    convert(U256::from(component.pool.market.totalSupplyAssets)) / wad;
                 let total_supply_shares =
-                    convert(U256::from(component.pool.market.totalSupplyShares));
-                let supply_apy = convert(component.supply_apy);
+                    convert(U256::from(component.pool.market.totalSupplyShares)) / wad;
 
                 // Convert shares to assets using price per share
                 let price_per_share = total_supply_assets / total_supply_shares;
@@ -206,11 +208,13 @@ impl VaultApy {
                 // Weight by proportion of total deposits
                 let weight = supplied_assets / total_deposits;
 
-                weight * supply_apy / wad
+                let supply_apy = convert(U256::from(component.supply_apy.to_u128().unwrap())) / wad;
+
+                weight * supply_apy
             })
             .fold(zero, |acc, x| acc + x);
 
-        gross_apy * fee_multiplier / wad
+        gross_apy * fee_multiplier
     }
 
     /// Returns the number of markets in the vault.
@@ -237,7 +241,7 @@ impl VaultApy {
 /// // Query a market's APY
 /// let morpho_addr: Address = "0x...".parse()?;
 /// let market_id = [0u8; 32].into();
-/// let apy = client.apy(morpho_addr, market_id).await?;
+/// let apy = client.apy::<f64, _>(morpho_addr, market_id, |e| e.exp()).await?;
 ///
 /// println!("Supply APY: {:.2}%", apy.supply * 100.0);
 /// # Ok(())
@@ -321,33 +325,41 @@ where
 
     /// Calculates the APY for a specific Morpho market.
     ///
-    /// # Parameters
+    /// This helper types require a type that can handle big decimal conversions
+    /// for precision. Using a simple f64 might overflow, cause conversion errors
+    /// or be unprecise enough.
     ///
-    /// - `address`: The Morpho Blue contract address
-    /// - `market_id`: The unique market identifier
-    ///
-    /// # Returns
-    ///
-    /// A `PoolApy` containing borrow and supply APY rates.
+    /// You can still use f64.
     ///
     /// # Example
     ///
     /// ```no_run
-    /// use hypersdk::hyperevm::morpho;
+    /// use hypersdk::hyperevm::{DynProvider, morpho::{self, MetaClient}};
     /// use hypersdk::Address;
     ///
-    /// # async fn example() -> anyhow::Result<()> {
-    /// let client = morpho::Client::mainnet().await?;
-    /// let morpho_addr: Address = "0x...".parse()?;
-    /// let market_id = [0u8; 32].into();
+    /// async fn example(provider: DynProvider, contract: Address) -> anyhow::Result<()> {
+    ///     let vault = MetaClient::new(provider)
+    ///         .apy::<f64, _>(contract, |e| e.exp())
+    ///         .await?;
     ///
-    /// let apy = client.apy(morpho_addr, market_id).await?;
-    /// println!("Borrow: {:.2}%, Supply: {:.2}%",
-    ///     apy.borrow * 100.0, apy.supply * 100.0);
-    /// # Ok(())
-    /// # }
+    ///     println!(
+    ///         "apy: {}%",
+    ///         vault.apy(|v| v.to::<i128>() as f64 / 1e18) * 100.0
+    ///     );
+    ///
+    ///     Ok(())
+    /// }
     /// ```
-    pub async fn apy(&self, address: Address, market_id: MarketId) -> anyhow::Result<PoolApy> {
+    pub async fn apy<T128, F>(
+        &self,
+        address: Address,
+        market_id: MarketId,
+        exp: F,
+    ) -> anyhow::Result<PoolApy<T128>>
+    where
+        T128: FromPrimitive + NumOps + One + Copy,
+        F: FnOnce(T128) -> T128,
+    {
         let morpho = IMorpho::new(address, self.provider.clone());
         let (params, market) = self
             .provider
@@ -356,15 +368,20 @@ where
             .add(morpho.market(market_id))
             .aggregate()
             .await?;
-        self.apy_with(params, market).await
+        self.apy_with(params, market, exp).await
     }
 
     /// Returns the APY of the market.
-    pub async fn apy_with(
+    pub async fn apy_with<T128, F>(
         &self,
         params: impl Into<MarketParams>,
         market: impl Into<Market>,
-    ) -> anyhow::Result<PoolApy> {
+        exp: F,
+    ) -> anyhow::Result<PoolApy<T128>>
+    where
+        T128: FromPrimitive + NumOps + One + Copy,
+        F: FnOnce(T128) -> T128,
+    {
         let params = params.into();
         let market = market.into();
         let irm = IIrm::new(params.irm, self.provider.clone());
@@ -373,11 +390,19 @@ where
             .call()
             .await?;
 
-        let fee = market.fee as f64 / 1e18;
-        let utilization = market.totalBorrowAssets as f64 / market.totalSupplyAssets as f64;
-        let rate = rate.to::<u64>() as f64 / 1e18;
-        let borrow_apy = (rate * 31_536_000f64).exp() - 1.0;
-        let supply_apy = borrow_apy * utilization * (1.0 - fee);
+        let error = || anyhow::anyhow!("unable to convert u128 into Float");
+
+        let wad = T128::from_u128(1_000_000_000_000_000_000u128).ok_or_else(error)?;
+        let seconds_in_a_year = T128::from_u128(31_536_000).ok_or_else(error)?;
+        let one = T128::one();
+
+        let fee = T128::from_u128(market.fee).ok_or_else(error)? / wad;
+        let utilization = T128::from_u128(market.totalBorrowAssets).ok_or_else(error)?
+            / T128::from_u128(market.totalSupplyAssets).ok_or_else(error)?;
+        let rate = T128::from_u128(rate.to::<u128>()).ok_or_else(error)? / wad;
+        let borrow_apy = (exp)(rate * seconds_in_a_year) - one;
+        let supply_apy = borrow_apy * utilization * (one - fee);
+
         Ok(PoolApy {
             params,
             market,
@@ -431,7 +456,14 @@ where
     /// Returns the pool's APY.
     ///
     /// <https://github.com/morpho-org/metamorpho-v1.1/blob/main/src/MetaMorphoV1_1.sol#L796>
-    pub async fn apy(&self, address: Address) -> anyhow::Result<VaultApy> {
+    pub async fn apy<T128, F>(&self, address: Address, exp: F) -> anyhow::Result<VaultApy<T128>>
+    where
+        T128: FromPrimitive + NumOps + One + Copy,
+        F: FnOnce(T128) -> T128 + Copy,
+    {
+        let error = || anyhow::anyhow!("unable to convert u128 into Float");
+        let wad = T128::from_u128(1_000_000_000_000_000_000u128).ok_or_else(error)?;
+
         let meta_morpho = IMetaMorpho::new(address, self.provider.clone());
         // the vault is at the same time a token and holds balances
         let vault_erc20 = ERC20::new(address, self.provider.clone());
@@ -481,11 +513,10 @@ where
                 .await?;
 
             let pool = Client::new(self.provider.clone())
-                .apy_with(params, market)
+                .apy_with::<T128, F>(params, market, exp)
                 .await?;
 
-            // Convert f64 supply APY to U256 (scaled by 1e18)
-            let supply_apy = U256::from((pool.supply * 1e18) as u128);
+            let supply_apy = pool.supply * wad;
 
             apy.components.push(VaultSupply {
                 supplied_shares: position.supplyShares,

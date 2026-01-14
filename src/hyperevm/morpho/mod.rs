@@ -64,7 +64,7 @@ use alloy::{
 use num_traits::{FromPrimitive, NumOps, One, ToPrimitive};
 
 use crate::hyperevm::{
-    DynProvider, ERC20,
+    DynProvider,
     morpho::contracts::{
         IIrm,
         IMetaMorpho::{self, IMetaMorphoInstance},
@@ -177,44 +177,35 @@ where
         F: Fn(U256) -> T256,
     {
         let zero = convert(U256::ZERO);
-        let million = convert(U256::from(1_000_000u128));
         let wad = convert(U256::from(1_000_000_000_000_000_000u128));
 
         if self.total_deposits.is_zero() {
             return zero;
         }
 
-        let total_deposits = convert(self.total_deposits) / wad;
-        let fee = convert(self.fee) / wad;
+        let total_deposits = convert(self.total_deposits);
+        let fee = convert(self.fee);
 
-        // Calculate fee as decimal: 1 - (fee / 1e18)
-        let fee_multiplier = wad - fee;
+        let fee_multiplier = (wad - fee) / wad;
 
         let gross_apy = self
             .components
             .iter()
             .map(|component| {
-                // scale all the values using `wad`
-                let supplied_shares = convert(component.supplied_shares) / wad / million;
+                let supplied_shares = convert(component.supplied_shares);
                 let total_supply_assets =
-                    convert(U256::from(component.pool.market.totalSupplyAssets)) / wad;
+                    convert(U256::from(component.pool.market.totalSupplyAssets));
                 let total_supply_shares =
-                    convert(U256::from(component.pool.market.totalSupplyShares)) / wad;
+                    convert(U256::from(component.pool.market.totalSupplyShares));
 
-                // Convert shares to assets using price per share
-                let price_per_share = total_supply_assets / total_supply_shares;
-                let supplied_assets = price_per_share * supplied_shares;
-
-                // Weight by proportion of total deposits
-                let weight = supplied_assets / total_deposits;
-
-                let supply_apy = convert(U256::from(component.supply_apy.to_u128().unwrap())) / wad;
-
-                weight * supply_apy
+                // Convert shares to assets: shares * total_assets / total_shares = assets
+                let supplied_assets = supplied_shares * total_supply_assets / total_supply_shares;
+                let supply_apy = convert(U256::from(component.supply_apy.to_u128().unwrap()));
+                supplied_assets * supply_apy / total_deposits
             })
             .fold(zero, |acc, x| acc + x);
 
-        gross_apy * fee_multiplier
+        gross_apy * fee_multiplier / wad
     }
 
     /// Returns the number of markets in the vault.
@@ -465,14 +456,12 @@ where
         let wad = T128::from_u128(1_000_000_000_000_000_000u128).ok_or_else(error)?;
 
         let meta_morpho = IMetaMorpho::new(address, self.provider.clone());
-        // the vault is at the same time a token and holds balances
-        let vault_erc20 = ERC20::new(address, self.provider.clone());
-        let (fee, supply_queue_len, total_supply, morpho_addr) = self
+        let (fee, supply_queue_len, total_assets, morpho_addr) = self
             .provider
             .multicall()
             .add(meta_morpho.fee())
             .add(meta_morpho.supplyQueueLength())
-            .add(vault_erc20.totalSupply())
+            .add(meta_morpho.totalAssets())
             .add(meta_morpho.MORPHO())
             .aggregate()
             .await?;
@@ -483,7 +472,7 @@ where
         let mut apy = VaultApy {
             components: vec![],
             fee: U256::from(fee),
-            total_deposits: total_supply,
+            total_deposits: total_assets,
         };
         for i in 0..supply_queue_len {
             // TODO: is there a way to aggregate this?

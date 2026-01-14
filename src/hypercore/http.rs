@@ -64,9 +64,9 @@ use crate::hypercore::{
     },
     mainnet_url, testnet_url,
     types::{
-        BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder, Fill, InfoRequest,
-        OrderResponseStatus, OrderUpdate, ScheduleCancel, SendAsset, SendToken, SpotSend, UsdSend,
-        UserBalance,
+        BasicOrder, BatchCancel, BatchCancelCloid, BatchModify, BatchOrder, ClearinghouseState,
+        Fill, FundingRate, InfoRequest, OrderResponseStatus, OrderUpdate, ScheduleCancel,
+        SendAsset, SendToken, SpotSend, UsdSend, UserBalance,
     },
 };
 
@@ -559,6 +559,121 @@ impl Client {
             .await?;
 
         Ok(data.balances)
+    }
+
+    /// Retrieves the clearinghouse state for a user's perpetual positions.
+    ///
+    /// Returns the complete state of a user's perpetual trading account, including
+    /// margin summaries, withdrawable amounts, and all open positions.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use hypersdk::hypercore;
+    /// use hypersdk::Address;
+    ///
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let client = hypercore::mainnet();
+    /// let user: Address = "0x...".parse()?;
+    /// let state = client.clearinghouse_state(user).await?;
+    ///
+    /// // Check account value and withdrawable amount
+    /// println!("Account value: {}", state.margin_summary.account_value);
+    /// println!("Withdrawable: {}", state.withdrawable);
+    ///
+    /// // Check margin utilization
+    /// let utilization = state.margin_summary.margin_utilization();
+    /// println!("Margin utilization: {}%", utilization);
+    ///
+    /// // Iterate through positions
+    /// for asset_position in &state.asset_positions {
+    ///     let pos = &asset_position.position;
+    ///     println!("{} {}: {} @ {:?} (PnL: {})",
+    ///         pos.side(),
+    ///         pos.coin,
+    ///         pos.szi,
+    ///         pos.entry_px,
+    ///         pos.unrealized_pnl
+    ///     );
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn clearinghouse_state(&self, user: Address) -> Result<ClearinghouseState> {
+        let mut api_url = self.base_url.clone();
+        api_url.set_path("/info");
+
+        let data = self
+            .http_client
+            .post(api_url)
+            .json(&InfoRequest::ClearinghouseState { user })
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(data)
+    }
+
+    /// Retrieves historical funding rates for a perpetual market.
+    ///
+    /// Returns funding rate snapshots for the specified coin within the given time range.
+    /// Funding rates are typically applied every 8 hours.
+    ///
+    /// # Parameters
+    ///
+    /// - `coin`: Market symbol (e.g., "BTC", "ETH")
+    /// - `start_time`: Start time in milliseconds (inclusive)
+    /// - `end_time`: Optional end time in milliseconds (inclusive). Defaults to current time.
+    ///
+    /// # Notes
+    ///
+    /// - Only the most recent 500 records are returned per request
+    /// - To paginate, use the last returned timestamp as the next `start_time`
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use hypersdk::hypercore;
+    ///
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let client = hypercore::mainnet();
+    ///
+    /// // Get BTC funding rates from the last 24 hours
+    /// let end_time = chrono::Utc::now().timestamp_millis() as u64;
+    /// let start_time = end_time - 24 * 60 * 60 * 1000; // 24 hours ago
+    ///
+    /// let rates = client.funding_history("BTC", start_time, Some(end_time)).await?;
+    ///
+    /// for rate in rates {
+    ///     println!("Funding rate at {}: {} (premium: {})",
+    ///         rate.time, rate.funding_rate, rate.premium);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn funding_history(
+        &self,
+        coin: impl Into<String>,
+        start_time: u64,
+        end_time: Option<u64>,
+    ) -> Result<Vec<FundingRate>> {
+        let mut api_url = self.base_url.clone();
+        api_url.set_path("/info");
+
+        let data = self
+            .http_client
+            .post(api_url)
+            .json(&InfoRequest::FundingHistory {
+                coin: coin.into(),
+                start_time,
+                end_time,
+            })
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        Ok(data)
     }
 
     /// Retrieves the multi-signature wallet configuration for a user.

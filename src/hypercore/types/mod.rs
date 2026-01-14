@@ -1673,6 +1673,297 @@ pub struct ScheduleCancel {
     pub time: Option<u64>,
 }
 
+// ========================================================
+// CLEARINGHOUSE STATE TYPES
+// ========================================================
+
+/// Clearinghouse state for a user's perpetual positions.
+///
+/// # Example
+///
+/// ```no_run
+/// use hypersdk::hypercore;
+/// use hypersdk::Address;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let client = hypercore::mainnet();
+/// let user: Address = "0x...".parse()?;
+/// let state = client.clearinghouse_state(user).await?;
+///
+/// println!("Account value: {}", state.margin_summary.account_value);
+/// println!("Withdrawable: {}", state.withdrawable);
+///
+/// for position in &state.asset_positions {
+///     println!("{}: {} @ {:?}",
+///         position.position.coin,
+///         position.position.szi,
+///         position.position.entry_px
+///     );
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearinghouseState {
+    /// Margin summary for isolated positions
+    pub margin_summary: MarginSummary,
+    /// Margin summary for cross-margin account
+    pub cross_margin_summary: MarginSummary,
+    /// Cross maintenance margin used
+    pub cross_maintenance_margin_used: Decimal,
+    /// Amount available for withdrawal
+    pub withdrawable: Decimal,
+    /// List of asset positions
+    pub asset_positions: Vec<AssetPosition>,
+    /// Timestamp in milliseconds
+    pub time: u64,
+}
+
+/// Margin summary for an account.
+///
+/// Contains aggregate margin information for either isolated or cross-margin positions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarginSummary {
+    /// Total account value (equity)
+    pub account_value: Decimal,
+    /// Total notional position value
+    pub total_ntl_pos: Decimal,
+    /// Total raw USD value
+    pub total_raw_usd: Decimal,
+    /// Total margin used
+    pub total_margin_used: Decimal,
+}
+
+impl MarginSummary {
+    /// Returns the available margin (account value - margin used).
+    #[must_use]
+    pub fn available_margin(&self) -> Decimal {
+        self.account_value - self.total_margin_used
+    }
+
+    /// Returns the margin utilization as a percentage.
+    ///
+    /// Returns 0 if account value is zero.
+    #[must_use]
+    pub fn margin_utilization(&self) -> Decimal {
+        if self.account_value.is_zero() {
+            Decimal::ZERO
+        } else {
+            (self.total_margin_used / self.account_value) * Decimal::ONE_HUNDRED
+        }
+    }
+}
+
+/// Position type for perpetual positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, derive_more::Display)]
+#[serde(rename_all = "camelCase")]
+pub enum PositionType {
+    /// One-way position mode (single position per market)
+    #[display("oneWay")]
+    OneWay,
+}
+
+/// A user's position in a specific asset.
+///
+/// Wraps the position details along with cumulative funding information.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetPosition {
+    /// Type of position
+    #[serde(rename = "type")]
+    pub position_type: PositionType,
+    /// Detailed position information
+    pub position: PositionData,
+}
+
+/// Detailed position data for an asset.
+///
+/// Contains all information about a single perpetual position.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionData {
+    /// Asset/coin symbol (e.g., "BTC", "ETH")
+    pub coin: String,
+    /// Position size (positive for long, negative for short)
+    pub szi: Decimal,
+    /// Leverage configuration
+    pub leverage: Leverage,
+    /// Entry price
+    pub entry_px: Option<Decimal>,
+    /// Current position value
+    pub position_value: Decimal,
+    /// Unrealized profit and loss
+    pub unrealized_pnl: Decimal,
+    /// Return on equity (as a decimal, e.g., 0.05 for 5%)
+    pub return_on_equity: Decimal,
+    /// Liquidation price (None if no position)
+    pub liquidation_px: Option<Decimal>,
+    /// Margin used for this position
+    pub margin_used: Decimal,
+    /// Maximum leverage allowed for this asset
+    pub max_leverage: u32,
+    /// Cumulative funding payments
+    pub cum_funding: CumulativeFunding,
+}
+
+impl PositionData {
+    /// Returns true if this is a long position.
+    #[must_use]
+    pub fn is_long(&self) -> bool {
+        self.szi > Decimal::ZERO
+    }
+
+    /// Returns true if this is a short position.
+    #[must_use]
+    pub fn is_short(&self) -> bool {
+        self.szi < Decimal::ZERO
+    }
+
+    /// Returns the absolute position size.
+    #[must_use]
+    pub fn abs_size(&self) -> Decimal {
+        self.szi.abs()
+    }
+
+    /// Returns the position side as a string ("long" or "short").
+    #[must_use]
+    pub fn side(&self) -> &'static str {
+        if self.is_long() { "long" } else { "short" }
+    }
+}
+
+/// Leverage type for positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, derive_more::Display)]
+#[serde(rename_all = "camelCase")]
+pub enum LeverageType {
+    /// Cross-margin mode (shared margin across positions)
+    #[display("cross")]
+    Cross,
+    /// Isolated-margin mode (dedicated margin per position)
+    #[display("isolated")]
+    Isolated,
+}
+
+/// Leverage configuration for a position.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Leverage {
+    /// Leverage type
+    #[serde(rename = "type")]
+    pub leverage_type: LeverageType,
+    /// Leverage value (e.g., 10 for 10x)
+    pub value: u32,
+    /// Raw USD value used for isolated leverage (if applicable)
+    #[serde(default)]
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub raw_usd: Option<Decimal>,
+}
+
+impl Leverage {
+    /// Returns true if this is cross-margin leverage.
+    #[must_use]
+    pub fn is_cross(&self) -> bool {
+        self.leverage_type == LeverageType::Cross
+    }
+
+    /// Returns true if this is isolated-margin leverage.
+    #[must_use]
+    pub fn is_isolated(&self) -> bool {
+        self.leverage_type == LeverageType::Isolated
+    }
+}
+
+/// Cumulative funding payments for a position.
+///
+/// Tracks funding payments over different time periods.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CumulativeFunding {
+    /// Total funding payments since position opened
+    pub all_time: Decimal,
+    /// Funding payments since position was opened
+    pub since_open: Decimal,
+    /// Funding payments since last position change
+    pub since_change: Decimal,
+}
+
+// ========================================================
+// ========================================================
+// FUNDING RATE TYPES
+// ========================================================
+
+/// Historical funding rate record.
+///
+/// Represents a single funding rate snapshot for a perpetual market.
+/// Funding rates are typically applied every 8 hours.
+///
+/// # Fields
+///
+/// - `coin`: Market symbol (e.g., "BTC", "ETH")
+/// - `funding_rate`: The funding rate applied to positions (decimal format)
+/// - `premium`: Market premium component used in funding calculation
+/// - `time`: Unix timestamp in milliseconds when the rate was applied
+///
+/// # Example
+///
+/// ```no_run
+/// use hypersdk::hypercore;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let client = hypercore::mainnet();
+/// let start_time = 1681923833000u64;
+/// let rates = client.funding_history("BTC", start_time, None).await?;
+///
+/// for rate in rates {
+///     println!("{} funding rate at {}: {} (premium: {})",
+///         rate.coin, rate.time, rate.funding_rate, rate.premium);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundingRate {
+    /// Market symbol (e.g., "BTC", "ETH")
+    pub coin: String,
+    /// Funding rate applied to positions
+    #[serde(with = "rust_decimal::serde::str")]
+    pub funding_rate: Decimal,
+    /// Market premium component
+    #[serde(with = "rust_decimal::serde::str")]
+    pub premium: Decimal,
+    /// Timestamp in milliseconds
+    pub time: u64,
+}
+
+impl FundingRate {
+    /// Returns the annualized funding rate (assuming 3 funding periods per day).
+    ///
+    /// Funding typically occurs every 8 hours (3 times per day).
+    #[must_use]
+    pub fn annualized_rate(&self) -> Decimal {
+        self.funding_rate * Decimal::from(3 * 365)
+    }
+
+    /// Returns true if the funding rate is positive (longs pay shorts).
+    #[must_use]
+    pub fn is_positive(&self) -> bool {
+        self.funding_rate > Decimal::ZERO
+    }
+
+    /// Returns true if the funding rate is negative (shorts pay longs).
+    #[must_use]
+    pub fn is_negative(&self) -> bool {
+        self.funding_rate < Decimal::ZERO
+    }
+}
+
+// ========================================================
+// USER BALANCE TYPES
+// ========================================================
+
 /// User balance.
 ///
 /// Represents the balance of a specific token in a user's account.
@@ -1969,6 +2260,9 @@ pub(super) enum InfoRequest {
     SpotClearinghouseState {
         user: Address,
     },
+    ClearinghouseState {
+        user: Address,
+    },
     AllMids,
     CandleSnapshot {
         req: CandleSnapshotRequest,
@@ -1978,6 +2272,13 @@ pub(super) enum InfoRequest {
     },
     ExtraAgents {
         user: Address,
+    },
+    FundingHistory {
+        coin: String,
+        #[serde(rename = "startTime")]
+        start_time: u64,
+        #[serde(rename = "endTime", skip_serializing_if = "Option::is_none")]
+        end_time: Option<u64>,
     },
 }
 
@@ -2265,5 +2566,54 @@ mod tests {
         assert_eq!(original.r, parsed.r);
         assert_eq!(original.s, parsed.s);
         assert_eq!(original.v, parsed.v);
+    }
+
+    #[test]
+    fn test_clearinghouse_state_deserialization() {
+        let json = r#"{"marginSummary":{"accountValue":"8272576.5729350001","totalNtlPos":"9077249.2563109994","totalRawUsd":"8099875.5474460004","totalMarginUsed":"1120386.813659"},"crossMarginSummary":{"accountValue":"8259027.0754620004","totalNtlPos":"9038408.6103639994","totalRawUsd":"8047485.4040259998","totalMarginUsed":"1106837.3161859999"},"crossMaintenanceMarginUsed":"356978.709123","withdrawable":"6286581.8806220004","assetPositions":[{"type":"oneWay","position":{"coin":"BTC","szi":"-1.47472","leverage":{"type":"cross","value":20},"entryPx":"95137.8","positionValue":"140406.61648","unrealizedPnl":"-104.935956","returnOnEquity":"-0.0149586171","liquidationPx":"5387394.7801264981","marginUsed":"7020.330824","maxLeverage":40,"cumFunding":{"allTime":"-179748.281779","sinceOpen":"0.0","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"ETH","szi":"-45.7436","leverage":{"type":"cross","value":20},"entryPx":"3297.47","positionValue":"151232.91596","unrealizedPnl":"-394.470067","returnOnEquity":"-0.0523036504","liquidationPx":"172665.4473515121","marginUsed":"7561.645798","maxLeverage":25,"cumFunding":{"allTime":"-131967.431285","sinceOpen":"-1.52718","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"SOL","szi":"30390.93","leverage":{"type":"cross","value":20},"entryPx":"144.1206","positionValue":"4398175.3896000003","unrealizedPnl":"18214.531954","returnOnEquity":"0.0831721221","liquidationPx":null,"marginUsed":"219908.76948","maxLeverage":20,"cumFunding":{"allTime":"-142932.239953","sinceOpen":"817.466593","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"LTC","szi":"3.51","leverage":{"type":"cross","value":10},"entryPx":"98.87","positionValue":"277.72875","unrealizedPnl":"-69.30495","returnOnEquity":"-1.9970668555","liquidationPx":null,"marginUsed":"27.772875","maxLeverage":10,"cumFunding":{"allTime":"-866.777178","sinceOpen":"4.951526","sinceChange":"4.951526"}}},{"type":"oneWay","position":{"coin":"LDO","szi":"16332.0","leverage":{"type":"cross","value":10},"entryPx":"0.66227","positionValue":"10661.85624","unrealizedPnl":"-154.358374","returnOnEquity":"-0.142710162","liquidationPx":null,"marginUsed":"1066.185624","maxLeverage":10,"cumFunding":{"allTime":"-911.231239","sinceOpen":"0.432907","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"XRP","szi":"-92720.0","leverage":{"type":"cross","value":20},"entryPx":"2.127177","positionValue":"197317.432","unrealizedPnl":"-85.535846","returnOnEquity":"-0.0086736322","liquidationPx":"85.2742980086","marginUsed":"9865.8716","maxLeverage":20,"cumFunding":{"allTime":"-37019.125174","sinceOpen":"-7.576659","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"WIF","szi":"146.0","leverage":{"type":"cross","value":5},"entryPx":"0.344551","positionValue":"60.85864","unrealizedPnl":"10.55408","returnOnEquity":"1.0490182202","liquidationPx":null,"marginUsed":"12.171728","maxLeverage":5,"cumFunding":{"allTime":"-406.325071","sinceOpen":"0.168658","sinceChange":"0.168658"}}},{"type":"oneWay","position":{"coin":"SAGA","szi":"-220.2","leverage":{"type":"cross","value":3},"entryPx":"0.10448","positionValue":"13.899024","unrealizedPnl":"9.107472","returnOnEquity":"1.1875957121","liquidationPx":"30759.3016032192","marginUsed":"4.633008","maxLeverage":3,"cumFunding":{"allTime":"-1.45675","sinceOpen":"0.17651","sinceChange":"0.17651"}}},{"type":"oneWay","position":{"coin":"MOODENG","szi":"54674.0","leverage":{"type":"cross","value":3},"entryPx":"0.084892","positionValue":"4618.58615","unrealizedPnl":"-22.823047","returnOnEquity":"-0.0147518002","liquidationPx":null,"marginUsed":"1539.528716","maxLeverage":3,"cumFunding":{"allTime":"-305.852735","sinceOpen":"2.6037","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"PURR","szi":"-552200.0","leverage":{"type":"cross","value":3},"entryPx":"0.069135","positionValue":"34082.3362","unrealizedPnl":"4094.36687","returnOnEquity":"0.3217433571","liquidationPx":"12.3275383017","marginUsed":"11360.778733","maxLeverage":3,"cumFunding":{"allTime":"-32307.633703","sinceOpen":"-2092.213336","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"HYPE","szi":"-149078.45","leverage":{"type":"cross","value":5},"entryPx":"25.4825","positionValue":"3878574.0336500001","unrealizedPnl":"-79672.19014","returnOnEquity":"-0.1048621331","liquidationPx":"76.4988794996","marginUsed":"775714.80673","maxLeverage":10,"cumFunding":{"allTime":"-309555.435116","sinceOpen":"-3164.915837","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"VIRTUAL","szi":"-9594.1","leverage":{"type":"cross","value":5},"entryPx":"1.92458","positionValue":"10004.72748","unrealizedPnl":"8459.899945","returnOnEquity":"2.2908396011","liquidationPx":"749.8030102371","marginUsed":"2000.945496","maxLeverage":5,"cumFunding":{"allTime":"-818.537548","sinceOpen":"-885.85754","sinceChange":"-132.426133"}}},{"type":"oneWay","position":{"coin":"MORPHO","szi":"-1286.7","leverage":{"type":"cross","value":5},"entryPx":"1.3869","positionValue":"1801.50867","unrealizedPnl":"-16.972812","returnOnEquity":"-0.0475552562","liquidationPx":"5584.4267052968","marginUsed":"360.301734","maxLeverage":5,"cumFunding":{"allTime":"-140.852999","sinceOpen":"-0.524002","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"IP","szi":"55968.6","leverage":{"type":"cross","value":3},"entryPx":"3.75896","positionValue":"211180.72152","unrealizedPnl":"796.732292","returnOnEquity":"0.0113611159","liquidationPx":null,"marginUsed":"70393.57384","maxLeverage":3,"cumFunding":{"allTime":"-975.559391","sinceOpen":"-40.161499","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"MON","szi":"-1114261.0","leverage":{"type":"isolated","value":3,"rawUsd":"36359.245859"},"entryPx":"0.024464","positionValue":"26961.773417","unrealizedPnl":"297.787566","returnOnEquity":"0.0327724536","liquidationPx":"0.0296643783","marginUsed":"9397.472442","maxLeverage":5,"cumFunding":{"allTime":"-574.970969","sinceOpen":"-2.49958","sinceChange":"0.0"}}},{"type":"oneWay","position":{"coin":"MET","szi":"-43463.0","leverage":{"type":"isolated","value":3,"rawUsd":"16030.897561"},"entryPx":"0.27653","positionValue":"11878.87253","unrealizedPnl":"139.95366","returnOnEquity":"0.0349336094","liquidationPx":"0.316148663","marginUsed":"4152.025031","maxLeverage":3,"cumFunding":{"allTime":"-312.089456","sinceOpen":"-1.465492","sinceChange":"0.0"}}}],"time":1768397010203}"#;
+
+        let state: ClearinghouseState = serde_json::from_str(json).unwrap();
+
+        // Check margin summary
+        assert_eq!(
+            state.margin_summary.account_value.to_string(),
+            "8272576.5729350001"
+        );
+        assert_eq!(
+            state.margin_summary.total_margin_used.to_string(),
+            "1120386.813659"
+        );
+
+        // Check withdrawable
+        assert_eq!(state.withdrawable.to_string(), "6286581.8806220004");
+
+        // Check positions count
+        assert_eq!(state.asset_positions.len(), 16);
+
+        // Check first position (BTC short)
+        let btc_pos = &state.asset_positions[0].position;
+        assert_eq!(btc_pos.coin, "BTC");
+        assert_eq!(btc_pos.szi.to_string(), "-1.47472");
+        assert!(btc_pos.is_short());
+        assert_eq!(btc_pos.entry_px.unwrap().to_string(), "95137.8");
+        assert_eq!(btc_pos.leverage.value, 20);
+        assert!(btc_pos.leverage.is_cross());
+        assert_eq!(btc_pos.cum_funding.all_time.to_string(), "-179748.281779");
+
+        // Check a long position (SOL)
+        let sol_pos = &state.asset_positions[2].position;
+        assert_eq!(sol_pos.coin, "SOL");
+        assert!(sol_pos.is_long());
+        assert_eq!(sol_pos.szi.to_string(), "30390.93");
+
+        // Check an isolated margin position (MON)
+        let mon_pos = &state.asset_positions[14].position;
+        assert_eq!(mon_pos.coin, "MON");
+        assert!(mon_pos.leverage.is_isolated());
+        assert_eq!(mon_pos.leverage.value, 3);
+        assert!(mon_pos.leverage.raw_usd.is_some());
+
+        // Check timestamp
+        assert_eq!(state.time, 1768397010203);
     }
 }

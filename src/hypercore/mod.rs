@@ -1573,4 +1573,64 @@ mod tests {
             assert_eq!(address, value, "unexpected {address} <> {value}");
         }
     }
+
+    #[tokio::test]
+    async fn test_http_clearinghouse_state() {
+        let client = hypercore::mainnet();
+        // Use a known address with positions (Hyperliquid vault)
+        let user = address!("0x162cc7c861ebd0c06b3d72319201150482518185");
+        let state = client.clearinghouse_state(user).await.unwrap();
+
+        // Verify structure is returned correctly
+        assert!(state.time > 0);
+        // Account should have some value
+        assert!(state.margin_summary.account_value >= rust_decimal::Decimal::ZERO);
+    }
+
+    #[tokio::test]
+    async fn test_http_user_balances() {
+        let client = hypercore::mainnet();
+        let user = address!("0xdfc24b077bc1425ad1dea75bcb6f8158e10df303");
+        // Should return a list (possibly empty) without error
+        let _balances = client.user_balances(user).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_all_mids() {
+        let client = hypercore::mainnet();
+        let mids = client.all_mids().await.unwrap();
+
+        // Should have prices for major markets
+        assert!(mids.contains_key("BTC"));
+        assert!(mids.contains_key("ETH"));
+        assert!(*mids.get("BTC").unwrap() > rust_decimal::Decimal::ZERO);
+    }
+
+    #[tokio::test]
+    async fn test_http_open_orders() {
+        let client = hypercore::mainnet();
+        let user = address!("0xdfc24b077bc1425ad1dea75bcb6f8158e10df303");
+        // Should return a list (possibly empty) without error
+        let _orders = client.open_orders(user).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_perps() {
+        let client = hypercore::mainnet();
+        let perps = client.perps().await.unwrap();
+
+        // Should have major markets
+        assert!(!perps.is_empty());
+        assert!(perps.iter().any(|m| m.name == "BTC"));
+        assert!(perps.iter().any(|m| m.name == "ETH"));
+    }
+
+    #[tokio::test]
+    async fn test_http_spot() {
+        let client = hypercore::mainnet();
+        let spots = client.spot().await.unwrap();
+
+        // Should have spot markets
+        assert!(!spots.is_empty());
+    }
 }

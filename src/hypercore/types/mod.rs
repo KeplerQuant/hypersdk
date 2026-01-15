@@ -1579,10 +1579,11 @@ pub enum OrderTypePlacement {
     Limit {
         tif: TimeInForce,
     },
+    #[serde(rename_all = "camelCase")]
     Trigger {
+        is_market: bool,
         #[serde(with = "rust_decimal::serde::str")]
         trigger_px: Decimal,
-        is_market: bool,
         tpsl: TpSl,
     },
 }
@@ -1591,7 +1592,7 @@ pub enum OrderTypePlacement {
 ///
 /// Indicates whether the trigger is a take‑profit (`Tp`) or stop‑loss (`Sl`).
 #[derive(PartialEq, Eq, Deserialize, Serialize, Copy, Clone, Debug)]
-#[serde(rename = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum TpSl {
     Tp,
     Sl,

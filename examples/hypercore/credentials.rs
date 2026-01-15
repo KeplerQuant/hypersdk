@@ -13,7 +13,7 @@ pub struct Credentials {
     #[arg(short, long)]
     keystore: Option<PathBuf>,
     /// Keystore password. Optional, otherwise prompted.
-    #[arg(short, long)]
+    #[arg(long)]
     keystore_password: Option<String>,
     /// Raw private key in hex
     #[arg(short, long)]

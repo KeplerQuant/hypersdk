@@ -37,6 +37,7 @@ use futures::StreamExt;
 use hypersdk::hypercore::{
     self as hypercore,
     types::{Incoming, Subscription},
+    ws::Event,
 };
 
 #[tokio::main]
@@ -54,8 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = core.websocket();
     ws.subscribe(Subscription::AllMids { dex: None });
 
-    while let Some(item) = ws.next().await {
-        if let Incoming::AllMids { dex: _, mids } = item {
+    while let Some(event) = ws.next().await {
+        if let Event::Message(Incoming::AllMids { dex: _, mids }) = event {
             if let Some(price) = mids.get(&khype.name) {
                 println!(
                     "Price of {}/{} is {}",

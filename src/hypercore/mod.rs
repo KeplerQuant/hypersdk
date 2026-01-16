@@ -38,7 +38,7 @@
 //! ## WebSocket Market Data
 //!
 //! ```no_run
-//! use hypersdk::hypercore::{self, types::*};
+//! use hypersdk::hypercore::{self, types::*, ws::Event};
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> anyhow::Result<()> {
@@ -48,7 +48,8 @@
 //! ws.subscribe(Subscription::Trades { coin: "BTC".into() });
 //! ws.subscribe(Subscription::L2Book { coin: "BTC".into() });
 //!
-//! while let Some(msg) = ws.next().await {
+//! while let Some(event) = ws.next().await {
+//!     let Event::Message(msg) = event else { continue };
 //!     match msg {
 //!         Incoming::Trades(trades) => {
 //!             for trade in trades {

@@ -879,13 +879,15 @@ impl Client {
     /// let client = hypercore::mainnet();
     /// let addr: Address = "0x...".parse()?;
     ///
-    /// let response = client.user_role(addr).await?;
-    /// match response.role {
-    ///     hypersdk::hypercore::types::UserRoleType::User => println!("Regular user"),
-    ///     hypersdk::hypercore::types::UserRoleType::Vault => println!("Vault account"),
-    ///     hypersdk::hypercore::types::UserRoleType::Agent => println!("Agent wallet"),
-    ///     hypersdk::hypercore::types::UserRoleType::SubAccount => println!("Subaccount"),
-    ///     hypersdk::hypercore::types::UserRoleType::Missing => println!("Not found"),
+    /// let role = client.user_role(addr).await?;
+    /// match role {
+    ///     hypersdk::hypercore::types::UserRole::User => println!("Regular user"),
+    ///     hypersdk::hypercore::types::UserRole::Vault => println!("Vault account"),
+    ///     hypersdk::hypercore::types::UserRole::Agent { user } => {
+    ///         println!("Agent wallet for {}", user);
+    ///     }
+    ///     hypersdk::hypercore::types::UserRole::SubAccount => println!("Subaccount"),
+    ///     hypersdk::hypercore::types::UserRole::Missing => println!("Not found"),
     /// }
     /// # Ok(())
     /// # }
@@ -902,9 +904,12 @@ impl Client {
             .json(&InfoRequest::UserRole { user })
             .send()
             .await?
-            .json()
+            .text()
             .await?;
-        Ok(resp)
+
+        println!("{resp}");
+
+        Ok(serde_json::from_str(&resp)?)
     }
 
     /// Retrieve a user's subaccounts.

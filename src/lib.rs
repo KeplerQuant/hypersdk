@@ -94,7 +94,7 @@
 //! ### WebSocket Subscriptions
 //!
 //! ```no_run
-//! use hypersdk::hypercore::{self, types::*};
+//! use hypersdk::hypercore::{self, types::*, ws::Event};
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> anyhow::Result<()> {
@@ -108,8 +108,9 @@
 //!     interval: "15m".into()
 //! });
 //!
-//! // Process incoming messages
-//! while let Some(msg) = ws.next().await {
+//! // Process incoming events
+//! while let Some(event) = ws.next().await {
+//!     let Event::Message(msg) = event else { continue };
 //!     match msg {
 //!         Incoming::Trades(trades) => {
 //!             for trade in trades {

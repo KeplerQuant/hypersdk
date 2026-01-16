@@ -40,6 +40,7 @@ use futures::StreamExt;
 use hypersdk::hypercore::{
     self,
     types::{Incoming, Subscription},
+    ws::Event,
 };
 
 #[tokio::main]
@@ -59,46 +60,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Subscribed to BTC 1m candles. Waiting for updates...\n");
 
-    // Process incoming candle updates
-    while let Some(msg) = ws.next().await {
-        match msg {
-            Incoming::Candle(candle) => {
-                // Calculate some metrics
-                let change = candle.close - candle.open;
-                let change_pct = if !candle.open.is_zero() {
-                    (change / candle.open) * rust_decimal::Decimal::ONE_HUNDRED
-                } else {
-                    rust_decimal::Decimal::ZERO
-                };
-                let range = candle.high - candle.low;
-
-                // Print formatted candle data
-                println!("{} {} candle:", candle.coin, candle.interval);
-                println!("  Open:   {}", candle.open);
-                println!("  High:   {}", candle.high);
-                println!("  Low:    {}", candle.low);
-                println!("  Close:  {}", candle.close);
-                println!("  Volume: {} {}", candle.volume, candle.coin);
-                println!("  Trades: {}", candle.num_trades);
-                println!(
-                    "  Change: {} ({:+.2}%)",
-                    if change.is_sign_positive() {
-                        format!("+{}", change)
+    // Process incoming events
+    while let Some(event) = ws.next().await {
+        match event {
+            Event::Connected => {
+                println!("WebSocket connected");
+            }
+            Event::Disconnected => {
+                println!("WebSocket disconnected");
+            }
+            Event::Message(msg) => match msg {
+                Incoming::Candle(candle) => {
+                    // Calculate some metrics
+                    let change = candle.close - candle.open;
+                    let change_pct = if !candle.open.is_zero() {
+                        (change / candle.open) * rust_decimal::Decimal::ONE_HUNDRED
                     } else {
-                        change.to_string()
-                    },
-                    change_pct
-                );
-                println!("  Range:  {}", range);
-                println!("  Time:   {} - {}\n", candle.open_time, candle.close_time);
-            }
-            Incoming::SubscriptionResponse(_) => {
-                println!("Subscription confirmed");
-            }
-            Incoming::Ping => {
-                // Server sent ping, connection is alive
-            }
-            _ => {}
+                        rust_decimal::Decimal::ZERO
+                    };
+                    let range = candle.high - candle.low;
+
+                    // Print formatted candle data
+                    println!("{} {} candle:", candle.coin, candle.interval);
+                    println!("  Open:   {}", candle.open);
+                    println!("  High:   {}", candle.high);
+                    println!("  Low:    {}", candle.low);
+                    println!("  Close:  {}", candle.close);
+                    println!("  Volume: {} {}", candle.volume, candle.coin);
+                    println!("  Trades: {}", candle.num_trades);
+                    println!(
+                        "  Change: {} ({:+.2}%)",
+                        if change.is_sign_positive() {
+                            format!("+{}", change)
+                        } else {
+                            change.to_string()
+                        },
+                        change_pct
+                    );
+                    println!("  Range:  {}", range);
+                    println!("  Time:   {} - {}\n", candle.open_time, candle.close_time);
+                }
+                Incoming::SubscriptionResponse(_) => {
+                    println!("Subscription confirmed");
+                }
+                Incoming::Ping => {
+                    // Server sent ping, connection is alive
+                }
+                _ => {}
+            },
         }
     }
 

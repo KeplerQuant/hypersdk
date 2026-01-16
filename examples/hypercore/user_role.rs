@@ -10,7 +10,7 @@
 //! ```
 
 use clap::Parser;
-use hypersdk::{Address, hypercore, hypercore::types::UserRoleType};
+use hypersdk::{Address, hypercore, hypercore::types::UserRole};
 
 #[derive(Parser)]
 struct Args {
@@ -24,29 +24,29 @@ async fn main() -> anyhow::Result<()> {
 
     let client = hypercore::mainnet();
 
-    let response = client.user_role(args.address).await?;
+    let role = client.user_role(args.address).await?;
 
     println!("Address: {:?}", args.address);
     println!();
 
-    match response.role {
-        UserRoleType::User => {
+    match role {
+        UserRole::User => {
             println!("Role: User");
             println!("This is a regular trading account.");
         }
-        UserRoleType::Vault => {
+        UserRole::Vault => {
             println!("Role: Vault");
             println!("This is a vault account that can accept deposits from followers.");
         }
-        UserRoleType::Agent => {
+        UserRole::Agent { user } => {
             println!("Role: Agent");
-            println!("This is an agent wallet authorized to trade on behalf of another account.");
+            println!("This is an agent wallet authorized to trade on behalf of {user}.");
         }
-        UserRoleType::SubAccount => {
+        UserRole::SubAccount { master } => {
             println!("Role: Subaccount");
-            println!("This is a subaccount controlled by a master account.");
+            println!("This is a subaccount controlled by a master account {master}.");
         }
-        UserRoleType::Missing => {
+        UserRole::Missing => {
             println!("Role: Missing");
             println!("This address was not found in the Hyperliquid system.");
         }

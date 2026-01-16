@@ -2111,34 +2111,31 @@ pub struct ApiAgent {
 /// let addr: Address = "0x...".parse()?;
 /// let role = client.user_role(addr).await?;
 ///
-/// match role.role {
-///     hypersdk::hypercore::types::UserRoleType::User => println!("Regular user"),
-///     hypersdk::hypercore::types::UserRoleType::Vault => println!("Vault account"),
-///     hypersdk::hypercore::types::UserRoleType::Agent => println!("Agent wallet"),
+/// match role {
+///     hypersdk::hypercore::types::UserRole::User => println!("Regular user"),
+///     hypersdk::hypercore::types::UserRole::Vault => println!("Vault account"),
+///     hypersdk::hypercore::types::UserRole::Agent { user } => {
+///         println!("Agent wallet for {}", user);
+///     }
 ///     _ => {}
 /// }
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserRole {
-    /// The role type
-    pub role: UserRoleType,
-}
-
-/// Type of role for a user in the Hyperliquid system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, derive_more::Display)]
-#[serde(rename_all = "camelCase")]
-pub enum UserRoleType {
+#[serde(tag = "role", content = "data", rename_all = "camelCase")]
+pub enum UserRole {
     /// Regular user account
     User,
     /// Agent wallet authorized to act on behalf of another account
-    Agent,
+    Agent {
+        /// The main user address this agent acts on behalf of
+        user: Address,
+    },
     /// Vault account
     Vault,
     /// Subaccount
-    SubAccount,
+    SubAccount { master: Address },
     /// Address not found in the system
     Missing,
 }

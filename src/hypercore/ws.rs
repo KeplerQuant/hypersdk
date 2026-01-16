@@ -3,12 +3,54 @@
 //! This module provides a persistent WebSocket connection that automatically
 //! reconnects on failure and manages subscriptions across reconnections.
 //!
+//! # Connection Status
+//!
+//! The connection yields [`Event`] which wraps connection state and data messages:
+//!
+//! - [`Event::Connected`] - Connection established (including after reconnection)
+//! - [`Event::Disconnected`] - Connection lost (will auto-reconnect)
+//! - [`Event::Message`] - Contains an [`Incoming`] data message
+//!
+//! You can also check the current connection status using [`Connection::is_connected()`].
+//!
 //! # Examples
+//!
+//! ## Handle Connection Status
+//!
+//! ```no_run
+//! use hypersdk::hypercore::{self, ws::Event, types::*};
+//! use futures::StreamExt;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let mut ws = hypercore::mainnet_ws();
+//! ws.subscribe(Subscription::Trades { coin: "BTC".into() });
+//!
+//! while let Some(event) = ws.next().await {
+//!     match event {
+//!         Event::Connected => {
+//!             println!("Connected to WebSocket");
+//!         }
+//!         Event::Disconnected => {
+//!             println!("Disconnected");
+//!         }
+//!         Event::Message(msg) => match msg {
+//!             Incoming::Trades(trades) => {
+//!                 for trade in trades {
+//!                     println!("Trade: {} {} @ {}", trade.side, trade.sz, trade.px);
+//!                 }
+//!             }
+//!             _ => {}
+//!         }
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! ## Subscribe to Market Data
 //!
 //! ```no_run
-//! use hypersdk::hypercore::{self, types::*};
+//! use hypersdk::hypercore::{self, ws::Event, types::*};
 //! use futures::StreamExt;
 //!
 //! # async fn example() -> anyhow::Result<()> {
@@ -18,7 +60,8 @@
 //! ws.subscribe(Subscription::Trades { coin: "BTC".into() });
 //! ws.subscribe(Subscription::L2Book { coin: "BTC".into() });
 //!
-//! while let Some(msg) = ws.next().await {
+//! while let Some(event) = ws.next().await {
+//!     let Event::Message(msg) = event else { continue };
 //!     match msg {
 //!         Incoming::Trades(trades) => {
 //!             for trade in trades {
@@ -38,7 +81,7 @@
 //! ## Subscribe to User Events
 //!
 //! ```no_run
-//! use hypersdk::hypercore::{self, types::*};
+//! use hypersdk::hypercore::{self, ws::Event, types::*};
 //! use hypersdk::Address;
 //! use futures::StreamExt;
 //!
@@ -50,7 +93,8 @@
 //! ws.subscribe(Subscription::OrderUpdates { user });
 //! ws.subscribe(Subscription::UserFills { user });
 //!
-//! while let Some(msg) = ws.next().await {
+//! while let Some(event) = ws.next().await {
+//!     let Event::Message(msg) = event else { continue };
 //!     match msg {
 //!         Incoming::OrderUpdates(updates) => {
 //!             for update in updates {
@@ -148,33 +192,94 @@ impl futures::Stream for Stream {
 
 type SubChannelData = (bool, Subscription);
 
-/// Persistent WebSocket connection with automatic reconnection.
+/// WebSocket event representing either a connection state change or a data message.
 ///
-/// This connection automatically handles:
-/// - Reconnection on connection failure
-/// - Re-subscription after reconnection
-/// - Periodic ping/pong to keep the connection alive
-///
-/// The connection implements `futures::Stream`, yielding [`Incoming`] messages.
+/// This enum cleanly separates connection lifecycle events from actual data messages,
+/// allowing you to handle each appropriately.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use hypersdk::hypercore::{self, types::*};
+/// use hypersdk::hypercore::{self, ws::Event, types::*};
 /// use futures::StreamExt;
 ///
 /// # async fn example() {
 /// let mut ws = hypercore::mainnet_ws();
 /// ws.subscribe(Subscription::Trades { coin: "BTC".into() });
 ///
-/// while let Some(msg) = ws.next().await {
-///     // Handle messages
+/// while let Some(event) = ws.next().await {
+///     match event {
+///         Event::Connected => println!("Connected!"),
+///         Event::Disconnected => println!("Disconnected"),
+///         Event::Message(msg) => {
+///             // Handle data messages
+///         }
+///     }
+/// }
+/// # }
+/// ```
+#[derive(Clone, Debug)]
+pub enum Event {
+    /// WebSocket connection established.
+    ///
+    /// Sent when a connection is successfully established, including after reconnection.
+    /// Subscriptions are automatically restored after reconnection.
+    Connected,
+    /// WebSocket connection lost.
+    ///
+    /// Sent when the connection is unexpectedly closed. The connection will
+    /// automatically attempt to reconnect.
+    Disconnected,
+    /// A data message received from the WebSocket.
+    Message(Incoming),
+}
+
+/// Persistent WebSocket connection with automatic reconnection.
+///
+/// This connection automatically handles:
+/// - Reconnection on connection failure
+/// - Re-subscription after reconnection
+/// - Periodic ping/pong to keep the connection alive
+/// - Connection status notifications via [`Event`]
+///
+/// The connection implements `futures::Stream`, yielding [`Event`] items that
+/// wrap both connection state changes and data messages.
+///
+/// # Connection Status
+///
+/// The connection emits status events through the stream:
+/// - [`Event::Connected`] - Connection established (including after reconnection)
+/// - [`Event::Disconnected`] - Connection lost
+/// - [`Event::Message`] - Contains an [`Incoming`] data message
+///
+/// # Example
+///
+/// ```no_run
+/// use hypersdk::hypercore::{self, ws::Event, types::*};
+/// use futures::StreamExt;
+///
+/// # async fn example() {
+/// let mut ws = hypercore::mainnet_ws();
+/// ws.subscribe(Subscription::Trades { coin: "BTC".into() });
+///
+/// while let Some(event) = ws.next().await {
+///     match event {
+///         Event::Connected => {
+///             println!("Connected!");
+///         }
+///         Event::Disconnected => {
+///             println!("Disconnected");
+///         }
+///         Event::Message(Incoming::Trades(trades)) => {
+///             // Handle trades...
+///         }
+///         _ => {}
+///     }
 /// }
 /// # }
 /// ```
 pub struct Connection {
-    rx: UnboundedReceiver<Incoming>,
-    // TODO: oneshot??
+    rx: UnboundedReceiver<Event>,
     tx: UnboundedSender<SubChannelData>,
 }
 
@@ -182,7 +287,9 @@ impl Connection {
     /// Creates a new WebSocket connection to the specified URL.
     ///
     /// The connection starts immediately and runs in the background,
-    /// automatically reconnecting on failures.
+    /// automatically reconnecting on failures. Connection status events
+    /// ([`Event::Connected`], [`Event::Disconnected`]) will be emitted through
+    /// the stream.
     ///
     /// # Example
     ///
@@ -236,7 +343,7 @@ impl Connection {
 }
 
 impl futures::Stream for Connection {
-    type Item = Incoming;
+    type Item = Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -246,23 +353,20 @@ impl futures::Stream for Connection {
 
 async fn connection(
     url: Url,
-    tx: UnboundedSender<Incoming>,
+    tx: UnboundedSender<Event>,
     mut srx: UnboundedReceiver<SubChannelData>,
 ) {
-    let mut subs: HashSet<Subscription> = HashSet::new();
-    let mut reconnect_attempts = 0u32;
     const MAX_RECONNECT_DELAY_MS: u64 = 5_000; // 5 seconds max
     const INITIAL_RECONNECT_DELAY_MS: u64 = 500;
+
+    let mut subs: HashSet<Subscription> = HashSet::new();
+    let mut reconnect_attempts = 0u32;
 
     loop {
         let mut stream = match timeout(Duration::from_secs(10), Stream::connect(url.clone())).await
         {
             Ok(ok) => match ok {
-                Ok(ok) => {
-                    log::info!("Connected to {url}");
-                    reconnect_attempts = 0; // Reset on successful connection
-                    ok
-                }
+                Ok(ok) => ok,
                 Err(err) => {
                     log::error!("Unable to connect to {url}: {err:?}");
 
@@ -271,12 +375,13 @@ async fn connection(
                         .min(MAX_RECONNECT_DELAY_MS);
                     reconnect_attempts = reconnect_attempts.saturating_add(1);
 
-                    log::info!(
+                    log::debug!(
                         "Reconnecting in {}ms (attempt {})",
                         delay_ms,
                         reconnect_attempts
                     );
                     sleep(Duration::from_millis(delay_ms)).await;
+
                     continue;
                 }
             },
@@ -287,7 +392,7 @@ async fn connection(
                     .min(MAX_RECONNECT_DELAY_MS);
                 reconnect_attempts = reconnect_attempts.saturating_add(1);
 
-                log::info!(
+                log::debug!(
                     "Reconnecting in {}ms (attempt {})",
                     delay_ms,
                     reconnect_attempts
@@ -298,9 +403,13 @@ async fn connection(
             }
         };
 
+        log::debug!("Connected to {url}");
+        reconnect_attempts = 0; // Reset on successful connection
+        let _ = tx.send(Event::Connected);
+
         // Re-subscribe to all active subscriptions after reconnection
         if !subs.is_empty() {
-            log::info!("Re-subscribing to {} channels", subs.len());
+            log::debug!("Re-subscribing to {} channels", subs.len());
             for sub in subs.iter() {
                 log::debug!("Re-subscribing to {sub}");
                 if let Err(err) = stream.subscribe(sub.clone()).await {
@@ -317,7 +426,7 @@ async fn connection(
                 }
                 maybe_item = stream.next() => {
                     let Some(item) = maybe_item else { break; };
-                    let _ = tx.send(item);
+                    let _ = tx.send(Event::Message(item));
                 }
                 item = srx.recv() => {
                     let Some((is_sub, sub)) = item else { return };
@@ -343,5 +452,6 @@ async fn connection(
         }
 
         log::warn!("Disconnected from {url}, attempting to reconnect...");
+        let _ = tx.send(Event::Disconnected);
     }
 }

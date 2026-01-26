@@ -367,16 +367,14 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn all_mids(&self, dex: Option<Dex>) -> Result<HashMap<String, Decimal>> {
+    pub async fn all_mids(&self, dex_name: Option<String>) -> Result<HashMap<String, Decimal>> {
         let mut api_url = self.base_url.clone();
         api_url.set_path("/info");
 
         let data = self
             .http_client
             .post(api_url)
-            .json(&InfoRequest::AllMids {
-                dex: dex.as_ref().map(|dex| dex.name.clone()),
-            })
+            .json(&InfoRequest::AllMids { dex: dex_name })
             .send()
             .await?
             .json()

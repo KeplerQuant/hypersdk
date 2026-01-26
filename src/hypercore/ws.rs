@@ -292,6 +292,91 @@ pub struct Connection {
     tx: UnboundedSender<SubChannelData>,
 }
 
+/// A handle for managing subscriptions to a WebSocket connection.
+///
+/// This handle is obtained by calling [`Connection::split()`] and allows for
+/// subscribing and unsubscribing to channels independently of where the
+/// event stream is being processed. It's useful for scenarios where you
+/// want to manage subscriptions from a separate task or context.
+///
+/// The subscriptions managed by this handle persist across automatic
+/// reconnections.
+///
+/// # Example
+///
+/// ```no_run
+/// use hypersdk::hypercore::{self, ws::Event, types::*};
+/// use futures::StreamExt;
+/// use tokio::spawn;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let ws = hypercore::mainnet_ws();
+/// let (handle, mut stream) = ws.split();
+///
+/// // Manage subscriptions in a separate task
+/// spawn(async move {
+///     handle.subscribe(Subscription::Trades { coin: "BTC".into() });
+///     handle.subscribe(Subscription::L2Book { coin: "ETH".into() });
+///
+///     // Later, unsubscribe
+///     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+///     handle.unsubscribe(Subscription::Trades { coin: "BTC".into() });
+/// });
+///
+/// // Process events in the current task
+/// while let Some(event) = stream.next().await {
+///     match event {
+///         Event::Message(Incoming::Trades(trades)) => {
+///             println!("Received {} trades", trades.len());
+///         }
+///         _ => {}
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Debug)]
+pub struct ConnectionHandle {
+    tx: UnboundedSender<SubChannelData>,
+}
+
+/// A stream of events from a WebSocket connection.
+///
+/// This stream is obtained by calling [`Connection::split()`] and yields
+/// [`Event`] items, which represent connection status changes or incoming
+/// data messages.
+///
+/// It implements `futures::Stream`, allowing you to easily process events
+/// using methods like `next().await` or `for_each()`.
+///
+/// # Example
+///
+/// ```no_run
+/// use hypersdk::hypercore::{self, ws::Event, types::*};
+/// use futures::StreamExt;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let ws = hypercore::mainnet_ws();
+/// let (_handle, mut stream) = ws.split();
+///
+/// while let Some(event) = stream.next().await {
+///     match event {
+///         Event::Connected => println!("Stream connected!"),
+///         Event::Disconnected => println!("Stream disconnected"),
+///         Event::Message(Incoming::Trades(trades)) => {
+///             println!("Received {} trades", trades.len());
+///         }
+///         _ => {}
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct ConnectionStream {
+    rx: UnboundedReceiver<Event>,
+}
+
 impl Connection {
     /// Creates a new WebSocket connection to the specified URL.
     ///
@@ -349,9 +434,70 @@ impl Connection {
     pub fn close(self) {
         drop(self);
     }
+
+    /// Splits the connection into a subscription handle and an event stream.
+    ///
+    /// This is useful when you want to drive the stream in one task and
+    /// manage subscriptions from another.
+    pub fn split(self) -> (ConnectionHandle, ConnectionStream) {
+        (
+            ConnectionHandle { tx: self.tx },
+            ConnectionStream { rx: self.rx },
+        )
+    }
 }
 
 impl futures::Stream for Connection {
+    type Item = Event;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        this.rx.poll_recv(cx)
+    }
+}
+
+impl ConnectionHandle {
+    /// Subscribes to a WebSocket channel.
+    ///
+    /// The subscription will persist across reconnections. If you're already
+    /// subscribed to this channel, this is a no-op.
+    ///
+    /// # Example
+    ///
+    /// Subscribe to market data:
+    /// - `ws.subscribe(Subscription::Trades { coin: "BTC".into() })`
+    /// - `ws.subscribe(Subscription::L2Book { coin: "ETH".into() })`
+    pub fn subscribe(&self, subscription: Subscription) {
+        let _ = self.tx.send((true, subscription));
+    }
+
+    /// Unsubscribes from a WebSocket channel.
+    ///
+    /// Stops receiving updates for this subscription. Does nothing if you're
+    /// not currently subscribed to this channel.
+    ///
+    /// # Example
+    ///
+    /// Unsubscribe from a channel:
+    /// `ws.unsubscribe(Subscription::Trades { coin: "BTC".into() })`
+    pub fn unsubscribe(&self, subscription: Subscription) {
+        let _ = self.tx.send((false, subscription));
+    }
+
+    /// Closes the WebSocket connection.
+    ///
+    /// After calling this, the connection will no longer receive messages
+    /// and cannot be reused.
+    ///
+    /// # Example
+    ///
+    /// Close the connection when done: `ws.close()`
+    pub fn close(self) {
+        drop(self);
+    }
+}
+
+impl futures::Stream for ConnectionStream {
     type Item = Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

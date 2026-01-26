@@ -335,7 +335,7 @@ pub enum Incoming {
 pub struct OrderUpdate {
     pub status: OrderStatus,
     pub status_timestamp: u64,
-    pub order: BasicOrder,
+    pub order: WsBasicOrder,
 }
 
 /// Best bid offer.
@@ -979,6 +979,29 @@ impl Fill {
 #[serde_as]
 #[serde(rename_all = "camelCase")]
 pub struct BasicOrder {
+    pub timestamp: u64,
+    pub coin: String,
+    pub side: Side,
+    pub limit_px: Decimal,
+    pub sz: Decimal,
+    pub oid: u64,
+    pub orig_sz: Decimal,
+    pub cloid: Option<B128>,
+    pub order_type: OrderType,
+    pub tif: Option<TimeInForce>,
+    pub reduce_only: bool,
+}
+
+/// Basic order information for WebSocket updates.
+///
+/// This struct represents core details of an order, typically seen in WebSocket
+/// messages like [`OrderUpdate`]. It is a simplified version of [`BasicOrder`],
+/// omitting placement-specific fields such as `order_type`, `tif`, and `reduce_only`,
+/// as these are not relevant for tracking existing order state via WebSockets.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde_as]
+#[serde(rename_all = "camelCase")]
+pub struct WsBasicOrder {
     pub timestamp: u64,
     pub coin: String,
     pub side: Side,

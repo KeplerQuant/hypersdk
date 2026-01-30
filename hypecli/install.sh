@@ -75,8 +75,6 @@ install() {
         echo "Error: Failed to download ${BINARY}"
         echo ""
         echo "Release assets may not be available for ${TARGET}."
-        echo "You can build from source instead:"
-        echo "  cargo install --git https://github.com/${REPO} --bin ${BINARY}"
         exit 1
     fi
 
@@ -117,36 +115,12 @@ install() {
     echo "Run '${BINARY} --agent-help' for detailed AI agent documentation"
 }
 
-# Alternative: install via cargo
-install_cargo() {
-    echo "Installing ${BINARY} via cargo..."
-    cargo install --git "https://github.com/${REPO}" --bin "${BINARY}"
-    echo ""
-    echo "Successfully installed ${BINARY}"
-    echo ""
-    echo "Run '${BINARY} --help' to get started"
-    echo "Run '${BINARY} --agent-help' for detailed AI agent documentation"
-}
-
 # Main
 main() {
     echo "hypecli installer"
     echo "================="
     echo ""
-
-    # Check if cargo is preferred or if we should try binary first
-    if [ "$1" = "--cargo" ] || [ "$USE_CARGO" = "1" ]; then
-        if command -v cargo >/dev/null 2>&1; then
-            install_cargo
-        else
-            echo "Error: cargo not found. Please install Rust first:"
-            echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-            exit 1
-        fi
-    else
-        # Try binary install, fall back to cargo
-        install
-    fi
+    install
 }
 
 main "$@"

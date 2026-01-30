@@ -19,11 +19,11 @@ include = [
   "Cargo.toml"
 ]
 
-[patch.crates-io]
-hypersdk = { path = ".." }
+# [patch.crates-io]
+# hypersdk = { path = ".." }
 
 [dependencies]
-hypersdk = { version = "0.1.4" }
+hypersdk = { version = "0.2" }
 clap = { version = "4.5", features = ["derive"] }
 tokio = { version = "1.43.1", features = [
     "rt",

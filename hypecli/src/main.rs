@@ -2,6 +2,7 @@ mod balances;
 mod markets;
 mod morpho;
 mod multisig;
+mod orders;
 mod to_multisig;
 mod utils;
 
@@ -11,15 +12,25 @@ use hypersdk::hypercore::Chain;
 use markets::{PerpsCmd, SpotCmd};
 use morpho::{MorphoApyCmd, MorphoPositionCmd, MorphoVaultApyCmd};
 use multisig::MultiSigCmd;
+use orders::OrderCmd;
 use to_multisig::ToMultiSigCmd;
 
-/// Main CLI structure for hypecli.
-///
-/// Parses command-line arguments and dispatches to the appropriate subcommand.
+/// Main CLI structure for hypecli - A command-line interface for Hyperliquid.
 #[derive(Parser)]
 #[command(author, version)]
 #[allow(clippy::large_enum_variant)]
-enum Cli {
+struct Cli {
+    /// Show detailed help for AI agents
+    #[arg(long)]
+    agent_help: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand)]
+#[allow(clippy::large_enum_variant)]
+enum Command {
     /// List perpetual markets
     Perps(PerpsCmd),
     /// List spot markets
@@ -37,9 +48,12 @@ enum Cli {
     Multisig(MultiSigCmd),
     /// Convert a regular user to a multi-sig user
     ToMultisig(ToMultiSigCmd),
+    /// Order management (place and cancel orders)
+    #[command(subcommand)]
+    Order(OrderCmd),
 }
 
-impl Cli {
+impl Command {
     async fn run(self) -> anyhow::Result<()> {
         match self {
             Self::Perps(cmd) => cmd.run().await,
@@ -50,6 +64,7 @@ impl Cli {
             Self::MorphoVaultApy(cmd) => cmd.run().await,
             Self::Multisig(cmd) => cmd.run().await,
             Self::ToMultisig(cmd) => cmd.run().await,
+            Self::Order(cmd) => cmd.run().await,
         }
     }
 }
@@ -76,6 +91,261 @@ pub struct SignerArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Cli::parse();
-    args.run().await
+    let cli = Cli::parse();
+
+    if cli.agent_help {
+        print_agent_help();
+        return Ok(());
+    }
+
+    match cli.command {
+        Some(cmd) => cmd.run().await,
+        None => {
+            // No command provided, show help
+            use clap::CommandFactory;
+            Cli::command().print_help()?;
+            println!();
+            Ok(())
+        }
+    }
+}
+
+fn print_agent_help() {
+    print!(
+        r#"HYPECLI - AI Agent Guide
+========================
+
+This CLI provides commands for interacting with the Hyperliquid decentralized exchange.
+Below is a comprehensive guide for AI agents on how to use each command.
+
+CHAIN SELECTION
+---------------
+Most commands require a `--chain` argument. Valid values are:
+  - mainnet  Production Hyperliquid network
+  - testnet  Test network for development
+
+AUTHENTICATION
+--------------
+Commands that modify state (orders, transfers, etc.) require authentication via SignerArgs:
+  --private-key <HEX>   Direct private key (with or without 0x prefix)
+  --keystore <NAME>     Foundry keystore name (located in ~/.foundry/keystores/)
+  --password <PASS>     Keystore password (prompted if not provided)
+
+Note: Ledger hardware wallets are supported for multi-sig operations but NOT for
+order placement/cancellation (which require synchronous signing).
+
+ASSET NAME FORMATS
+------------------
+Order commands use human-readable asset names with automatic index resolution:
+
+  Format        Example         Description
+  ──────────────────────────────────────────────────────────
+  SYMBOL        BTC, ETH        Perpetual on Hyperliquid DEX
+  BASE/QUOTE    PURR/USDC       Spot market
+  dex:SYMBOL    xyz:BTC         Perpetual on HIP3 DEX
+
+Use `hypecli perps` or `hypecli spot` to list available markets.
+
+QUERY COMMANDS (No Authentication Required)
+-------------------------------------------
+
+List Perpetual Markets:
+  hypecli perps
+
+List Spot Markets:
+  hypecli spot
+
+Query Spot Balances:
+  hypecli spot-balances --address <ADDRESS>
+
+Query Morpho Position:
+  hypecli morpho-position --address <ADDRESS>
+
+Query Morpho APY:
+  hypecli morpho-apy --market <MARKET_ID>
+
+Query Morpho Vault APY:
+  hypecli morpho-vault-apy --vault <VAULT_ADDRESS>
+
+ORDER COMMANDS
+--------------
+
+Place a Limit Order:
+  hypecli order limit \
+    --chain mainnet \
+    --private-key <HEX> \
+    --asset BTC \
+    --side buy \
+    --price 50000 \
+    --size 0.1 \
+    --tif gtc
+
+  Arguments:
+    --asset <NAME>       Asset name (see Asset Name Formats above)
+    --side <buy|sell>    Order direction
+    --price <DECIMAL>    Limit price
+    --size <DECIMAL>     Order size in base asset units
+    --tif <gtc|alo|ioc>  Time-in-force (default: gtc)
+                         gtc = Good Till Cancel
+                         alo = Add Liquidity Only (maker-only)
+                         ioc = Immediate or Cancel
+    --reduce-only        Optional flag to only reduce existing position
+    --cloid <HEX>        Optional client order ID (16 bytes hex)
+
+Place a Market Order:
+  hypecli order market \
+    --chain mainnet \
+    --private-key <HEX> \
+    --asset ETH \
+    --side buy \
+    --size 0.1 \
+    --slippage-price 3100
+
+  Arguments:
+    --asset <NAME>              Asset name
+    --side <buy|sell>           Order direction
+    --size <DECIMAL>            Order size
+    --slippage-price <DECIMAL>  Worst acceptable fill price
+    --reduce-only               Optional flag
+    --cloid <HEX>               Optional client order ID
+
+Cancel Order (by OID or CLOID):
+  # Cancel by OID (exchange-assigned order ID)
+  hypecli order cancel \
+    --chain mainnet \
+    --private-key <HEX> \
+    --asset BTC \
+    --oid 123456789
+
+  # Cancel by CLOID (client-assigned order ID)
+  hypecli order cancel \
+    --chain mainnet \
+    --private-key <HEX> \
+    --asset BTC \
+    --cloid 0x0123456789abcdef0123456789abcdef
+
+  Arguments:
+    --asset <NAME>    Asset name the order belongs to
+    --oid <NUMBER>    Exchange-assigned order ID (use this OR --cloid)
+    --cloid <HEX>     Client-assigned order ID, 32 hex chars (use this OR --oid)
+
+MULTI-SIG COMMANDS
+------------------
+
+Convert to Multi-Sig User:
+  hypecli to-multisig \
+    --chain mainnet \
+    --private-key <HEX> \
+    --authorized-user <ADDR1> \
+    --authorized-user <ADDR2> \
+    --threshold 2
+
+Multi-Sig Sign (participates via P2P gossip network):
+  hypecli multisig sign \
+    --chain mainnet \
+    --private-key <HEX> \
+    --multi-sig-addr <MULTISIG_ADDRESS>
+
+Multi-Sig Send Asset:
+  hypecli multisig send-asset \
+    --chain mainnet \
+    --private-key <HEX> \
+    --multi-sig-addr <MULTISIG_ADDRESS> \
+    --destination <RECIPIENT> \
+    --token <TOKEN_NAME> \
+    --amount <AMOUNT>
+
+Multi-Sig Update Configuration:
+  hypecli multisig update \
+    --chain mainnet \
+    --private-key <HEX> \
+    --multi-sig-addr <MULTISIG_ADDRESS> \
+    --authorized-user <ADDR1> \
+    --authorized-user <ADDR2> \
+    --threshold 2
+
+Convert Multi-Sig to Normal User:
+  hypecli multisig convert-to-normal-user \
+    --chain mainnet \
+    --private-key <HEX> \
+    --multi-sig-addr <MULTISIG_ADDRESS>
+
+EXAMPLE WORKFLOWS
+-----------------
+
+Workflow 1: Place and Cancel a Limit Order
+  # 1. Check available markets
+  hypecli perps
+
+  # 2. Place a limit buy order for BTC perpetual
+  hypecli order limit \
+    --chain mainnet \
+    --private-key 0xYOUR_KEY \
+    --asset BTC \
+    --side buy \
+    --price 45000 \
+    --size 0.01
+
+  # 3. Cancel the order using the returned OID or CLOID
+  hypecli order cancel \
+    --chain mainnet \
+    --private-key 0xYOUR_KEY \
+    --asset BTC \
+    --oid <RETURNED_OID>
+
+Workflow 2: Market Sell with Slippage Protection
+  hypecli order market \
+    --chain mainnet \
+    --private-key 0xYOUR_KEY \
+    --asset ETH \
+    --side sell \
+    --size 0.1 \
+    --slippage-price 2900
+
+Workflow 3: Trade on Spot Market
+  hypecli order limit \
+    --chain mainnet \
+    --private-key 0xYOUR_KEY \
+    --asset PURR/USDC \
+    --side buy \
+    --price 0.05 \
+    --size 1000
+
+Workflow 4: Trade on HIP3 DEX
+  hypecli order limit \
+    --chain mainnet \
+    --private-key 0xYOUR_KEY \
+    --asset xyz:BTC \
+    --side buy \
+    --price 45000 \
+    --size 0.01
+
+Workflow 5: Using Foundry Keystore
+  hypecli order limit \
+    --chain mainnet \
+    --keystore my-trading-key \
+    --asset BTC \
+    --side buy \
+    --price 45000 \
+    --size 0.01
+  # Password will be prompted interactively
+
+ERROR HANDLING
+--------------
+Common error scenarios:
+  - "Order operations require a private key or keystore" - Ledger not supported for orders
+  - "keystore doesn't exist" - Check ~/.foundry/keystores/ for available keystores
+  - "CLOID must be exactly 16 bytes" - Ensure CLOID is 32 hex characters
+  - "Perpetual market 'X' not found" - Use `hypecli perps` to list valid market names
+  - "Spot market 'X/Y' not found" - Use `hypecli spot` to list valid spot pairs
+  - "HIP3 DEX 'X' not found" - Check DEX name spelling
+  - Connection errors - Verify network connectivity and chain selection
+
+OUTPUT FORMAT
+-------------
+Most commands output human-readable text. Order commands return status information
+including order IDs (OID) and client order IDs (CLOID) for successful placements,
+which can be used for subsequent cancel operations.
+"#
+    );
 }

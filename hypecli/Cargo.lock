@@ -3275,7 +3275,9 @@ dependencies = [
 
 [[package]]
 name = "hypersdk"
-version = "0.1.4"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "015f8c41b89f474b62f5fca7a8459477b7d59ccc1c7008ce8e672ad3ea5d268a"
 dependencies = [
  "alloy",
  "anyhow",
@@ -7640,14 +7642,15 @@ dependencies = [
 
 [[package]]
 name = "yawc"
-version = "0.2.7"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f6a46c0f189bbef59a24169b1a6e4d8bc1e476f6ea05bc657cf8e67aa3fbb0c"
+checksum = "d25369b50bd99f0497f3e012fe8804b73ad83d1db66087e55983b1ec3971e9db"
 dependencies = [
  "base64",
  "bytes",
  "flate2",
  "futures",
+ "getrandom 0.2.16",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -7656,8 +7659,6 @@ dependencies = [
  "nom",
  "pin-project 1.1.10",
  "rand 0.8.5",
- "serde",
- "serde_json",
  "sha1 0.10.6",
  "simdutf8",
  "thiserror 2.0.17",

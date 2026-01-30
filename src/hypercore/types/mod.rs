@@ -646,6 +646,8 @@ impl CandleInterval {
     /// ## Example
     ///
     /// ```rust
+    /// use hypersdk::hypercore::CandleInterval;
+    ///
     /// let interval = CandleInterval::OneMonth;
     ///
     /// // February
@@ -1796,7 +1798,7 @@ pub struct ScheduleCancel {
 /// # async fn example() -> anyhow::Result<()> {
 /// let client = hypercore::mainnet();
 /// let user: Address = "0x...".parse()?;
-/// let state = client.clearinghouse_state(user).await?;
+/// let state = client.clearinghouse_state(user, None).await?;
 ///
 /// println!("Account value: {}", state.margin_summary.account_value);
 /// println!("Withdrawable: {}", state.withdrawable);

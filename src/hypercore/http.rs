@@ -366,7 +366,7 @@ impl Client {
     ///
     /// # async fn example() -> anyhow::Result<()> {
     /// let client = hypercore::mainnet();
-    /// let mids = client.all_mids().await?;
+    /// let mids = client.all_mids(None).await?;
     ///
     /// for (market, price) in mids {
     ///     println!("{}: {}", market, price);

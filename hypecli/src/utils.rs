@@ -6,7 +6,9 @@
 //! - Starting gossip nodes for peer-to-peer communication
 //! - Signing multi-sig actions
 //! - Parsing unified asset name formats
+//! - Keystore directory management
 
+use std::path::PathBuf;
 use std::{env::home_dir, str::FromStr};
 
 use alloy::signers::{self, Signer, ledger::LedgerSigner};
@@ -22,13 +24,19 @@ use hypersdk::hypercore::{HttpClient, PerpMarket, SpotMarket};
 
 use crate::SignerArgs;
 
+/// Get the default keystore directory path (~/.foundry/keystores).
+pub fn keystore_dir() -> anyhow::Result<PathBuf> {
+    let home = home_dir().ok_or_else(|| anyhow::anyhow!("Unable to locate home directory"))?;
+    Ok(home.join(".foundry").join("keystores"))
+}
+
 /// Generates a random secret key for the gossip node.
 pub fn make_key(_signer: &impl Signer) -> SecretKey {
     // let public_address = signer.address();
     // let mut address_bytes = [0u8; 32];
     // address_bytes[0..20].copy_from_slice(&public_address[..]);
     // SecretKey::from_bytes(&address_bytes)
-    SecretKey::generate(&mut rand::rng())
+    SecretKey::generate(&mut rand_09::rng())
 }
 
 /// Starts a gossip node for peer-to-peer multi-sig coordination.

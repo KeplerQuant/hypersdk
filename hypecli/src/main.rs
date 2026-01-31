@@ -1,3 +1,4 @@
+mod account;
 mod balances;
 mod markets;
 mod morpho;
@@ -8,7 +9,8 @@ mod subscribe;
 mod to_multisig;
 mod utils;
 
-use balances::SpotBalancesCmd;
+use account::AccountCmd;
+use balances::BalanceCmd;
 use clap::{Args, Parser};
 use hypersdk::hypercore::Chain;
 use markets::{PerpsCmd, SpotCmd};
@@ -35,12 +37,15 @@ struct Cli {
 #[derive(clap::Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum Command {
+    /// Account management (create and list keystores)
+    #[command(subcommand)]
+    Account(AccountCmd),
+    /// Query all balances (spot, perp, and DEX) for a user
+    Balance(BalanceCmd),
     /// List perpetual markets
     Perps(PerpsCmd),
     /// List spot markets
     Spot(SpotCmd),
-    /// Gather spot balances for a user.
-    SpotBalances(SpotBalancesCmd),
     /// Query an addresses' morpho balance
     MorphoPosition(MorphoPositionCmd),
     /// Query APY for a Morpho market
@@ -65,9 +70,10 @@ enum Command {
 impl Command {
     async fn run(self) -> anyhow::Result<()> {
         match self {
+            Self::Account(cmd) => cmd.run().await,
+            Self::Balance(cmd) => cmd.run().await,
             Self::Perps(cmd) => cmd.run().await,
             Self::Spot(cmd) => cmd.run().await,
-            Self::SpotBalances(cmd) => cmd.run().await,
             Self::MorphoPosition(cmd) => cmd.run().await,
             Self::MorphoApy(cmd) => cmd.run().await,
             Self::MorphoVaultApy(cmd) => cmd.run().await,
@@ -132,8 +138,8 @@ Below is a comprehensive guide for AI agents on how to use each command.
 CHAIN SELECTION
 ---------------
 Most commands require a `--chain` argument. Valid values are:
-  - mainnet  Production Hyperliquid network
-  - testnet  Test network for development
+  - Mainnet  Production Hyperliquid network
+  - Testnet  Test network for development
 
 AUTHENTICATION
 --------------
@@ -157,6 +163,20 @@ Order commands use human-readable asset names with automatic index resolution:
 
 Use `hypecli perps` or `hypecli spot` to list available markets.
 
+ACCOUNT COMMANDS
+----------------
+
+Create a New Keystore:
+  hypecli account create --name <KEYSTORE_NAME>
+  # Password will be prompted interactively
+Or alternatively you can specify the password
+  hypecli account create --name <KEYSTORE_NAME> --password <PASSWORD>
+
+List Available Keystores:
+  hypecli account list
+
+Keystores are stored in ~/.foundry/keystores/ and are compatible with Foundry.
+
 QUERY COMMANDS (No Authentication Required)
 -------------------------------------------
 
@@ -166,8 +186,20 @@ List Perpetual Markets:
 List Spot Markets:
   hypecli spot
 
-Query Spot Balances:
-  hypecli spot-balances --address <ADDRESS>
+Query All Balances (Spot, Perp, All DEXes):
+  hypecli balance --user <ADDRESS>
+  hypecli balance --user <ADDRESS> --format table
+  hypecli balance --user <ADDRESS> --format json
+
+  Output formats:
+  - pretty (default): Human-readable indented output
+  - table: Tab-aligned columns for terminal viewing
+  - json: Structured JSON for programmatic consumption
+
+  Shows:
+  - Spot balances (coin, hold, total)
+  - Perp account (account value, margin used, withdrawable, positions)
+  - All HIP-3 DEX balances (automatically queries all available DEXes)
 
 Query Morpho Position:
   hypecli morpho-position --address <ADDRESS>

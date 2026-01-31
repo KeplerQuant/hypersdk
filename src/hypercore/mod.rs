@@ -731,6 +731,8 @@ pub struct PerpMarket {
     pub isolated_margin: bool,
     /// Margin mode for this market
     pub margin_mode: Option<MarginMode>,
+    /// Whether growth mode is enabled for this market
+    pub growth_mode: bool,
     /// Price tick configuration for valid price increments
     pub table: PriceTick,
 }
@@ -1385,6 +1387,7 @@ pub async fn perp_markets(
                 collateral: collateral.clone(),
                 isolated_margin: perp.only_isolated,
                 margin_mode: perp.margin_mode,
+                growth_mode: perp.growth_mode,
                 table: build_perp_price_ticks(perp.sz_decimals),
             }
         })
@@ -1424,7 +1427,21 @@ struct PerpUniverseItem {
     only_isolated: bool,
     margin_mode: Option<MarginMode>,
     sz_decimals: i64,
+    #[serde(default, deserialize_with = "deserialize_growth_mode")]
+    growth_mode: bool,
     // margin_table_id: u64,
+}
+
+fn deserialize_growth_mode<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    match s.as_str() {
+        "enabled" => Ok(true),
+        "disabled" => Ok(false),
+        _ => Err(serde::de::Error::custom(format!("invalid growth_mode value: {}", s))),
+    }
 }
 
 #[derive(Debug, Copy, Clone, Deserialize)]

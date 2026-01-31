@@ -8,6 +8,7 @@ description: Trade perpetuals and spot markets on Hyperliquid. Place limit and m
 Hyperliquid is a high-performance L1 with a fully on-chain order book. Trade perpetuals with up to 50x leverage and spot markets with deep liquidity.
 
 Key features:
+
 - **On-chain order book** — All orders are on-chain, not just settlements
 - **Low fees** — 0.01% maker / 0.035% taker for perpetuals
 - **50+ perpetual markets** — BTC, ETH, SOL, and many more
@@ -48,22 +49,32 @@ Keystores are stored encrypted in `~/.foundry/keystores/`.
 Before trading, check available markets:
 
 ```bash
-# List all perpetual markets
+# List all perpetual markets on Hyperliquid
 hypecli perps
 
 # List all spot markets
 hypecli spot
+
+# List available HIP-3 DEXes (third-party perpetual exchanges on Hyperliquid)
+hypecli dexes
+
+# List perpetual markets on a specific HIP-3 DEX
+hypecli perps --dex xyz
 ```
+
+HIP-3 DEXes are third-party perpetual exchanges deployed on Hyperliquid. Each DEX can list its own markets with different assets or configurations.
 
 ## Asset Name Formats
 
 Orders use human-readable asset names:
 
-| Format | Example | Description |
-|--------|---------|-------------|
-| `SYMBOL` | `BTC`, `ETH` | Perpetual on Hyperliquid DEX |
-| `BASE/QUOTE` | `PURR/USDC` | Spot market |
-| `dex:SYMBOL` | `xyz:BTC` | Perpetual on HIP-3 DEX |
+| Format       | Example      | Description                  |
+| ------------ | ------------ | ---------------------------- |
+| `SYMBOL`     | `BTC`, `ETH` | Perpetual on Hyperliquid DEX |
+| `BASE/QUOTE` | `PURR/USDC`  | Spot market                  |
+| `dex:SYMBOL` | `xyz:BTC`    | Perpetual on HIP-3 DEX       |
+
+To trade on a HIP-3 DEX, prefix the asset with the DEX name and a colon (e.g., `xyz:BTC`).
 
 ## Placing Orders
 
@@ -91,11 +102,13 @@ hypecli order limit \
 ```
 
 **Time-in-force options:**
+
 - `gtc` (default) — Good Till Cancel, remains until filled or canceled
 - `alo` — Add Liquidity Only, rejected if it would take liquidity (maker-only)
 - `ioc` — Immediate or Cancel, fill immediately or cancel unfilled portion
 
 **Additional flags:**
+
 - `--reduce-only` — Only reduce an existing position, won't open new positions
 - `--cloid <HEX>` — Custom client order ID (16 bytes hex) for tracking
 
@@ -168,6 +181,7 @@ hypecli balance 0xYourAddress --format json
 ```
 
 This shows:
+
 - **Spot balances** — Token holdings
 - **Perp account** — Account value, margin used, withdrawable funds
 - **Positions** — Open perpetual positions with entry price, size, unrealized PnL
@@ -226,15 +240,18 @@ hypecli order cancel \
 
 ## Quick Reference
 
-| Operation | Command |
-|-----------|---------|
-| List perp markets | `hypecli perps` |
-| List spot markets | `hypecli spot` |
-| Limit order | `hypecli order limit --asset BTC --side buy --price 50000 --size 0.1 ...` |
-| Market order | `hypecli order market --asset BTC --side buy --size 0.1 --slippage-price 51000 ...` |
-| Cancel by OID | `hypecli order cancel --asset BTC --oid 123456789 ...` |
-| Cancel by CLOID | `hypecli order cancel --asset BTC --cloid 0x... ...` |
-| Check positions | `hypecli balance 0xAddress` |
+| Operation            | Command                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| List perp markets    | `hypecli perps`                                                                     |
+| List spot markets    | `hypecli spot`                                                                      |
+| List HIP-3 DEXes     | `hypecli dexes`                                                                     |
+| List HIP-3 DEX perps | `hypecli perps --dex xyz`                                                           |
+| Limit order          | `hypecli order limit --asset BTC --side buy --price 50000 --size 0.1 ...`           |
+| Market order         | `hypecli order market --asset BTC --side buy --size 0.1 --slippage-price 51000 ...` |
+| Trade on HIP-3 DEX   | `hypecli order limit --asset xyz:BTC --side buy --price 50000 --size 0.1 ...`       |
+| Cancel by OID        | `hypecli order cancel --asset BTC --oid 123456789 ...`                              |
+| Cancel by CLOID      | `hypecli order cancel --asset BTC --cloid 0x... ...`                                |
+| Check positions      | `hypecli balance 0xAddress`                                                         |
 
 ## Links
 

@@ -127,7 +127,7 @@ use tokio::{
     time::{interval, sleep, timeout},
 };
 use url::Url;
-use yawc::{Frame, Options, TcpWebSocket};
+use yawc::{Frame, OpCode, Options, TcpWebSocket};
 
 use crate::hypercore::types::{Incoming, Outgoing, Subscription};
 
@@ -184,7 +184,9 @@ impl futures::Stream for Stream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        while let Some(frame) = ready!(this.stream.poll_next_unpin(cx)) {
+        while let Some(frame) = ready!(this.stream.poll_next_unpin(cx))
+            && frame.opcode() == OpCode::Text
+        {
             match serde_json::from_slice(frame.payload()) {
                 Ok(ok) => {
                     return Poll::Ready(Some(ok));

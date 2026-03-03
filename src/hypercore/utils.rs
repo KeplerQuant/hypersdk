@@ -119,6 +119,33 @@ where
     s.parse::<Cloid>().map_err(serde::de::Error::custom)
 }
 
+/// Returns `true` if the cloid is zero (used for `skip_serializing_if`).
+///
+/// When the cloid is zero/default, the field is omitted from serialization
+/// to match the Python SDK and server-side hashing behavior.
+pub(super) fn is_cloid_zero(value: &Cloid) -> bool {
+    value.is_zero()
+}
+
+/// Serializes a non-zero cloid as a hex string (same as `serialize_cloid_as_hex`).
+///
+/// This is used in combination with `skip_serializing_if = "is_cloid_zero"` so this
+/// function is only called for non-zero cloids.
+pub(super) fn serialize_cloid_option<S>(value: &Cloid, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serialize_cloid_as_hex(value, serializer)
+}
+
+/// Deserializes a cloid from a hex string, defaulting to zero if absent.
+pub(super) fn deserialize_cloid_option<'de, D>(deserializer: D) -> Result<Cloid, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_cloid_from_hex(deserializer)
+}
+
 /// Serializes an address as a hex string.
 pub(super) fn serialize_address_as_hex<S>(value: &Address, serializer: S) -> Result<S::Ok, S::Error>
 where

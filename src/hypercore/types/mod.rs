@@ -2001,10 +2001,15 @@ pub struct OrderRequest {
     #[serde(rename = "t")]
     pub order_type: OrderTypePlacement,
     /// Client-supplied order ID for tracking.
+    ///
+    /// When set to `Cloid::ZERO` (or `Default`), this field is omitted from serialization
+    /// to match the server's hashing behavior (consistent with the Python SDK).
     #[serde(rename = "c")]
     #[serde(
-        serialize_with = "super::utils::serialize_cloid_as_hex",
-        deserialize_with = "super::utils::deserialize_cloid_from_hex"
+        serialize_with = "super::utils::serialize_cloid_option",
+        deserialize_with = "super::utils::deserialize_cloid_option",
+        skip_serializing_if = "super::utils::is_cloid_zero",
+        default
     )]
     pub cloid: Cloid,
 }

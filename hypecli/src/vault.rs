@@ -25,26 +25,21 @@ impl VaultCmd {
     pub async fn run(self) -> anyhow::Result<()> {
         match self {
             VaultCmd::Details(cmd) => cmd.run().await,
-            VaultCmd::Deposit(cmd) => {
-                let signer = find_signer_sync(&cmd.signer)?;
-                let client = HttpClient::new(cmd.signer.chain);
-                let nonce = NonceHandler::default().next();
-                println!("Depositing ${} vault {}", cmd.amount, cmd.vault);
-                client.vault_transfer(&signer, cmd.vault, cmd.amount, nonce, true).await?;
-                println!("Deposited successfully.");
-                Ok(())
-            }
-            VaultCmd::Withdraw(cmd) => {
-                let signer = find_signer_sync(&cmd.signer)?;
-                let client = HttpClient::new(cmd.signer.chain);
-                let nonce = NonceHandler::default().next();
-                println!("Withdrawing ${} vault {}", cmd.amount, cmd.vault);
-                client.vault_transfer(&signer, cmd.vault, cmd.amount, nonce, false).await?;
-                println!("Withdrawn successfully.");
-                Ok(())
-            }
+            VaultCmd::Deposit(cmd) => execute_transfer(cmd, true).await,
+            VaultCmd::Withdraw(cmd) => execute_transfer(cmd, false).await,
         }
     }
+}
+
+async fn execute_transfer(cmd: VaultTransferCmd, is_deposit: bool) -> anyhow::Result<()> {
+    let (verb, past) = if is_deposit { ("Depositing", "Deposited") } else { ("Withdrawing", "Withdrawn") };
+    let signer = find_signer_sync(&cmd.signer)?;
+    let client = HttpClient::new(cmd.signer.chain);
+    let nonce = NonceHandler::default().next();
+    println!("{} ${} vault {}", verb, cmd.amount, cmd.vault);
+    client.vault_transfer(&signer, cmd.vault, cmd.amount, nonce, is_deposit).await?;
+    println!("{} successfully.", past);
+    Ok(())
 }
 
 /// Arguments for vault deposit and withdrawal.
@@ -92,8 +87,9 @@ impl VaultDetailsCmd {
         println!("Max Withdrawable: ${}", details.max_withdrawable);
         println!();
         println!("Followers: {}", details.followers.len());
+        const DAY_PERIOD: &str = "day";
         let tvl = details.portfolio.iter()
-            .find(|(period, _)| period == "day")
+            .find(|(period, _)| period == DAY_PERIOD)
             .and_then(|(_, p)| p.account_value_history.iter().max_by_key(|(ts, _)| *ts))
             .map(|(_, value)| value.as_str());
         if let Some(tvl) = tvl {

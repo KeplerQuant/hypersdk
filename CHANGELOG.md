@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `PredictedFundingVenue::funding_interval_hours`, the funding interval the exchange reports per venue. Optional: 19 of 627 venue payloads on mainnet omit it
 - `HttpClient::perp_dex_details`, returning each HIP-3 DEX as `PerpDexDetails`: deployer, oracle updater, fee recipient, sub-deployer permissions as `SubDeployerGrant` (with `SubDeployerPermission` covering `perpDeploy` actions, the `{"hip3Star": ...}` proxy-operation grants of testnet-only HIP-3\* venues, and any other shape kept intact), and per-coin OI caps and funding multipliers, interest rates, and clamps as `AssetSetting`. `perp_dexes` drops everything but the name and index
 - New example: `examples/hypercore/hip3-dex-details.rs`
+- HIP-3\* support (testnet-only venues with an allowlist and proxied user operations): `PerpDeployAction::Star` with `Hip3StarAction`, whose `Hip3StarProxyOperation` covers `modifyApproval`, `modifyBackstopLiquidatorApproval`, `setReduceOnly`, `cancel`, `cancelAll`, `order`, and `sendAsset`; `PerpDexSchemaInput::is_star` to create a HIP-3\* venue; and the `userStarState` info request via `HttpClient::user_star_state`. The exchange returns `dexToState` as a list of `[dex, flags]` pairs, with `null` flags for some users, rather than the object the docs show; `UserStarState` accepts both
 
 ### Removed
 
@@ -45,6 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Breaking**: `HttpClient::reserve_request_weight` takes a `destination: Option<Address>` argument
 - `Response`, `OkResponse`, `OrderResponseStatus`, and `ActionRequest` now derive `Clone`; `Response`, `OkResponse`, and `OrderResponseStatus` also derive `Serialize`
 - `OkResponse` gained `CreateSubAccount` and `CreateVault`, which carry the address the exchange assigns
+- **Breaking**: `SubDeployerInput::variant` is a `SubDeployerPermission` instead of a `String`, so it can carry HIP-3\* grants such as `{"hip3Star": "order"}`. `"setOracle".into()` still works
+- **Breaking**: `PerpDexSchemaInput` gained an `is_star` field, so struct literals need `is_star: false`
 - All three signing paths (`sign`, `sign_sync`, `prehash`) now share one exhaustive match over `Action`, so adding an action is one edit instead of three
 - The live audits `deployer_action_shapes_are_still_accepted` and `undocumented_action_shapes_are_accepted` now also check that the exchange recovers the signing key's address. They only checked that payloads parsed, which is how the signing bugs below went unnoticed
 

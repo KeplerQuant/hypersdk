@@ -220,7 +220,9 @@ async fn main() -> anyhow::Result<()> {
                 println!("API rejected: {err}");
             } else if let Some(err) = e.downcast_ref::<reqwest::Error>() {
                 if err.is_timeout() {
-                    println!("Timed out, safe to retry");
+                    // The exchange may have accepted the transfer. Reconcile its status
+                    // before considering another send; a fresh nonce can send it twice.
+                    println!("Transfer outcome unknown after timeout: {err}");
                 } else {
                     println!("Network error: {err}");
                 }

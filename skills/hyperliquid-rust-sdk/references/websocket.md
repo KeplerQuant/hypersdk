@@ -287,10 +287,12 @@ pub enum PostRequest { Info(serde_json::Value), Action(Box<ActionRequest>) }
 pub enum PostResponsePayload { Info(serde_json::Value), Action(Response), Error(String) }
 ```
 
-`id` is echoed on the reply; use distinct ids. Replies are not guaranteed across reconnects, so
-time out and retry. `PostResponsePayload::Info` wraps the result one level deeper than HTTP:
-read `value["data"]`. Info requests, from `examples/hypercore/websocket_post.rs` (needs
-`serde_json`):
+`id` is echoed on the reply; use distinct ids. Replies are not guaranteed across reconnects.
+After a lost reply, an Info request can be sent again. For an Action, treat the result as
+ambiguous and reconcile its outcome before considering another submission; retrying a transfer
+with a fresh nonce can send it twice. `PostResponsePayload::Info` wraps the result one level
+deeper than HTTP: read `value["data"]`. Info requests, from `examples/hypercore/websocket_post.rs`
+(needs `serde_json`):
 
 ```rust
 use std::collections::HashMap;

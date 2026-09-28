@@ -158,26 +158,22 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## 3. IOC spot buy, then bridge to HyperEVM concurrently (`buy_and_transfer.rs`)
+## 3. IOC spot buy, then bridge the filled amount (`buy_and_transfer.rs`)
 
-Shows the eager-signing `place` future being moved into `tokio::spawn`, and retrying
-`transfer_to_evm` on a ticker until the order task finishes. The retry loop reuses one nonce
-(`nonce + 1`), so at most one of the transfers can be accepted.
+Place the IOC order, inspect its result, then submit one bridge transfer for the amount that
+filled. A timeout during the transfer leaves its outcome unknown; reconcile before resending.
 
 ```rust
 use std::{
-    future::poll_fn,
     str::FromStr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use hypersdk::hypercore::{
     self as hypercore, Cloid, PrivateKeySigner,
     types::{BatchOrder, OrderGrouping, OrderRequest, OrderTypePlacement, TimeInForce},
 };
-use rust_decimal::{Decimal, dec};
-use tokio::{sync::oneshot, time::interval};
+use rust_decimal::Decimal;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -197,62 +193,34 @@ async fn main() -> anyhow::Result<()> {
 
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
 
-    let future = client.place(
-        &signer,
-        BatchOrder {
-            orders: vec![OrderRequest {
-                asset: market.index,
-                is_buy: true,
-                limit_px: price,
-                sz: amount,
-                reduce_only: false,
-                order_type: OrderTypePlacement::Limit { tif: TimeInForce::Ioc },
-                cloid: Cloid::random(),
-            }],
-            grouping: OrderGrouping::Na,
-            builder: None,
-        },
-        nonce,
-        None,
-        None,
-    );
+    let statuses = client
+        .place(
+            &signer,
+            BatchOrder {
+                orders: vec![OrderRequest {
+                    asset: market.index,
+                    is_buy: true,
+                    limit_px: price,
+                    sz: amount,
+                    reduce_only: false,
+                    order_type: OrderTypePlacement::Limit { tif: TimeInForce::Ioc },
+                    cloid: Cloid::random(),
+                }],
+                grouping: OrderGrouping::Na,
+                builder: None,
+            },
+            nonce,
+            None,
+            None,
+        )
+        .await?;
 
-    let (tx, mut rx) = oneshot::channel();
-    let join = tokio::spawn(async move {
-        let mut futures = FuturesUnordered::new();
-        let mut ticker = interval(Duration::from_millis(50));
-        loop {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    futures.push(client.transfer_to_evm(
-                        &signer,
-                        market.tokens[0].clone(),
-                        amount * dec!(0.9993),
-                        nonce + 1,
-                    ));
-                }
-                _ = poll_fn(|cx| rx.poll_unpin(cx)) => {
-                    break;
-                }
-            }
-        }
-
-        while let Some(res) = futures.next().await {
-            println!("transfer: {res:?}");
-        }
-    });
-
-    tokio::spawn(async move {
-        let res = future.await;
-        let _ = tx.send(());
-        if let Ok(placements) = res {
-            if let hypercore::types::OrderResponseStatus::Filled { total_sz, .. } = &placements[0] {
-                println!("Successful taker order, sending {total_sz} to EVM");
-            }
-        }
-    });
-
-    let _ = join.await;
+    if let Some(hypercore::types::OrderResponseStatus::Filled { total_sz, .. }) = statuses.first() {
+        client
+            .transfer_to_evm(&signer, market.tokens[0].clone(), *total_sz, nonce + 1)
+            .await?;
+        println!("Successful taker order, sent {total_sz} to EVM");
+    }
     Ok(())
 }
 ```

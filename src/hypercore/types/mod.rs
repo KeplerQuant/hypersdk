@@ -85,6 +85,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use flate2::read::DeflateDecoder;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error, ser::SerializeMap};
+use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 
 use crate::hypercore::{Chain, Cloid, OidOrCloid, SpotToken};
@@ -3484,8 +3485,7 @@ impl PerpDexDetails {
 /// One per-coin setting of a HIP-3 DEX, such as an OI cap or a funding multiplier.
 ///
 /// Sent by the API as a `[coin, value]` array.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(from = "(String, Decimal)")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSetting {
     /// Coin name, e.g. `xyz:SP500`.
     pub coin: String,
@@ -3493,17 +3493,17 @@ pub struct AssetSetting {
     pub value: Decimal,
 }
 
-impl From<(String, Decimal)> for AssetSetting {
-    fn from((coin, value): (String, Decimal)) -> Self {
-        Self { coin, value }
+impl<'de> Deserialize<'de> for AssetSetting {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (coin, value) = <(String, Decimal)>::deserialize(deserializer)?;
+        Ok(Self { coin, value })
     }
 }
 
 /// A deployer permission and the sub-deployers allowed to use it.
 ///
 /// Sent by the API as a `[permission, [address, ..]]` array.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(from = "(SubDeployerPermission, Vec<Address>)")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubDeployerGrant {
     /// The delegated permission.
     pub permission: SubDeployerPermission,
@@ -3511,9 +3511,11 @@ pub struct SubDeployerGrant {
     pub users: Vec<Address>,
 }
 
-impl From<(SubDeployerPermission, Vec<Address>)> for SubDeployerGrant {
-    fn from((permission, users): (SubDeployerPermission, Vec<Address>)) -> Self {
-        Self { permission, users }
+impl<'de> Deserialize<'de> for SubDeployerGrant {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (permission, users) =
+            <(SubDeployerPermission, Vec<Address>)>::deserialize(deserializer)?;
+        Ok(Self { permission, users })
     }
 }
 
@@ -3530,23 +3532,33 @@ pub enum SubDeployerPermission {
     },
     /// Any other shape, including a `hip3Star` object with extra fields, kept as raw JSON so
     /// nothing is dropped.
-    Other(serde_json::Value),
+    Other(Value),
+}
+
+impl fmt::Display for SubDeployerPermission {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PerpDeploy(action) => formatter.write_str(action),
+            Self::Hip3Star { action } => write!(formatter, "hip3Star:{action}"),
+            Self::Other(raw) => write!(formatter, "{raw}"),
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for SubDeployerPermission {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
+        let value = Value::deserialize(deserializer)?;
         // Only the exact `{"hip3Star": "<operation>"}` shape is a HIP-3* grant. An object with
         // any other key, or with more than one, goes to `Other` so no field is lost.
         let hip3_star = match &value {
-            serde_json::Value::Object(map) if map.len() == 1 => map
+            Value::Object(map) if map.len() == 1 => map
                 .get("hip3Star")
-                .and_then(serde_json::Value::as_str)
+                .and_then(Value::as_str)
                 .map(str::to_owned),
             _ => None,
         };
         Ok(match (value, hip3_star) {
-            (serde_json::Value::String(action), _) => Self::PerpDeploy(action),
+            (Value::String(action), _) => Self::PerpDeploy(action),
             (_, Some(action)) => Self::Hip3Star { action },
             (value, None) => Self::Other(value),
         })
@@ -5309,82 +5321,82 @@ mod tests {
 
     #[test]
     fn perp_dex_details_keep_indices_and_permissions() {
-        // Trimmed mainnet `perpDexs` response. Index 0 is the validator-operated DEX.
+        // Representative `perpDexs` response. Index 0 is the validator-operated DEX.
         let json = r#"[
             null,
             {
-                "name": "xyz",
-                "fullName": "XYZ",
-                "deployer": "0x88806a71d74ad0a510b350545c9ae490912f0888",
+                "name": "mock",
+                "fullName": "Mock DEX",
+                "deployer": "0x0000000000000000000000000000000000000001",
                 "oracleUpdater": null,
-                "feeRecipient": "0x83ffcfb1f2ad843c474b2e28df86c721cb869d3a",
-                "assetToStreamingOiCap": [["xyz:AAPL", "200000000.0"], ["xyz:CL", "1000000000.0"]],
+                "feeRecipient": "0x0000000000000000000000000000000000000002",
+                "assetToStreamingOiCap": [["mock:ALPHA", "200000000.0"], ["mock:BETA", "1000000000.0"]],
                 "subDeployers": [
-                    ["haltTrading", ["0x7d16f116d252db609c56d27d6c9605eb03e16657"]],
-                    ["setOracle", ["0x1234567890545d1df9ee64b35fdd16966e08acec"]],
-                    [{"hip3Star": "order"}, ["0x73b69db46d41c6b721fb5cb9ce9f29193140950e"]],
+                    ["haltTrading", ["0x0000000000000000000000000000000000000003"]],
+                    ["setOracle", ["0x0000000000000000000000000000000000000004"]],
+                    [{"hip3Star": "order"}, ["0x0000000000000000000000000000000000000005"]],
                     [{"somethingNew": 1}, []]
                 ],
-                "assetToFundingMultiplier": [["xyz:AAPL", "0.5"]],
-                "assetToFundingInterestRate": [["xyz:EUR", "0.0"]],
+                "assetToFundingMultiplier": [["mock:ALPHA", "0.5"]],
+                "assetToFundingInterestRate": [["mock:GAMMA", "0.0"]],
                 "assetToFundingClamp": []
             },
             {
-                "name": "abcd",
-                "fullName": "ABCDEx",
-                "deployer": "0x372c7f6900000000000000000000000000000001",
-                "oracleUpdater": "0x372c7f6900000000000000000000000000000002",
+                "name": "sample",
+                "fullName": "Sample DEX",
+                "deployer": "0x0000000000000000000000000000000000000011",
+                "oracleUpdater": "0x0000000000000000000000000000000000000012",
                 "feeRecipient": null,
                 "assetToStreamingOiCap": [],
                 "subDeployers": [],
                 "assetToFundingMultiplier": [],
                 "assetToFundingInterestRate": [],
-                "assetToFundingClamp": [["abcd:USA500", "0.01"]]
+                "assetToFundingClamp": [["sample:INDEX", "0.01"]]
             }
         ]"#;
         let dexes = PerpDexDetails::from_response(serde_json::from_str(json).unwrap());
 
         assert_eq!(dexes.len(), 2);
-        let (xyz, abcd) = (&dexes[0], &dexes[1]);
-        assert_eq!((xyz.index, xyz.name.as_str()), (1, "xyz"));
-        assert_eq!((abcd.index, abcd.name.as_str()), (2, "abcd"));
-        assert_eq!(xyz.dex().index(), 1);
+        let (mock, sample) = (&dexes[0], &dexes[1]);
+        assert_eq!((mock.index, mock.name.as_str()), (1, "mock"));
+        assert_eq!((sample.index, sample.name.as_str()), (2, "sample"));
+        assert_eq!(mock.dex().index(), 1);
 
         assert_eq!(
-            xyz.sub_deployers_for("setOracle"),
-            ["0x1234567890545d1df9ee64b35fdd16966e08acec"
+            mock.sub_deployers_for("setOracle"),
+            ["0x0000000000000000000000000000000000000004"
                 .parse::<Address>()
                 .unwrap()]
         );
-        assert!(xyz.sub_deployers_for("setDeployerFees").is_empty());
+        assert!(mock.sub_deployers_for("setDeployerFees").is_empty());
         // HIP-3* venues on testnet grant proxy operations as objects. They parse, and never
         // match a perpDeploy action name.
         assert_eq!(
-            xyz.sub_deployers[2].permission,
+            mock.sub_deployers[2].permission,
             SubDeployerPermission::Hip3Star {
                 action: "order".into()
             }
         );
         assert!(matches!(
-            xyz.sub_deployers[3].permission,
+            mock.sub_deployers[3].permission,
             SubDeployerPermission::Other(_)
         ));
-        assert!(xyz.sub_deployers_for("order").is_empty());
-        assert!(xyz.oracle_updater.is_none());
-        assert!(abcd.fee_recipient.is_none());
-        assert!(abcd.oracle_updater.is_some());
+        assert!(mock.sub_deployers_for("order").is_empty());
+        assert!(mock.oracle_updater.is_none());
+        assert!(sample.fee_recipient.is_none());
+        assert!(sample.oracle_updater.is_some());
 
         assert_eq!(
-            xyz.asset_to_streaming_oi_cap[1],
+            mock.asset_to_streaming_oi_cap[1],
             AssetSetting {
-                coin: "xyz:CL".into(),
+                coin: "mock:BETA".into(),
                 value: Decimal::from(1_000_000_000),
             }
         );
         assert_eq!(
-            abcd.asset_to_funding_clamp,
+            sample.asset_to_funding_clamp,
             [AssetSetting {
-                coin: "abcd:USA500".into(),
+                coin: "sample:INDEX".into(),
                 value: Decimal::new(1, 2),
             }]
         );
@@ -5418,6 +5430,21 @@ mod tests {
                 "{json}"
             );
         }
+    }
+
+    #[test]
+    fn sub_deployer_permission_display() {
+        assert_eq!(
+            SubDeployerPermission::PerpDeploy("setOracle".into()).to_string(),
+            "setOracle"
+        );
+        assert_eq!(
+            SubDeployerPermission::Hip3Star {
+                action: "order".into(),
+            }
+            .to_string(),
+            "hip3Star:order"
+        );
     }
 
     #[test]

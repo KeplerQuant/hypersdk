@@ -7,7 +7,7 @@
 //! cargo run --example hip3-dex-details
 //! ```
 
-use hypersdk::hypercore::{self, SubDeployerPermission};
+use hypersdk::hypercore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,13 +30,8 @@ async fn main() -> anyhow::Result<()> {
         );
 
         for grant in &dex.sub_deployers {
-            let permission = match &grant.permission {
-                SubDeployerPermission::PerpDeploy(action) => action.clone(),
-                SubDeployerPermission::Hip3Star { action } => format!("hip3Star:{action}"),
-                SubDeployerPermission::Other(raw) => raw.to_string(),
-            };
             let users: Vec<String> = grant.users.iter().map(ToString::to_string).collect();
-            println!("  {permission:<26} {}", users.join(", "));
+            println!("  {:<26} {}", grant.permission, users.join(", "));
         }
     }
 

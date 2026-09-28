@@ -190,6 +190,52 @@ where
     serializer.serialize_str(&format!("{:#x}", value))
 }
 
+/// Serializes an optional address as a lowercase hex string, or `null` when absent.
+pub(super) fn serialize_option_address_as_hex<S>(
+    value: &Option<Address>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(address) => serialize_address_as_hex(address, serializer),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Serializes `(address, value)` pairs with each address as a lowercase hex string.
+pub(super) fn serialize_address_pairs_as_hex<S, T>(
+    pairs: &[(Address, T)],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    serializer.collect_seq(
+        pairs
+            .iter()
+            .map(|(address, value)| (format!("{address:#x}"), value)),
+    )
+}
+
+/// [`serialize_address_pairs_as_hex`] for an optional list. Pair it with
+/// `skip_serializing_if = "Option::is_none"`.
+pub(super) fn serialize_option_address_pairs_as_hex<S, T>(
+    pairs: &Option<Vec<(Address, T)>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    match pairs {
+        Some(pairs) => serialize_address_pairs_as_hex(pairs, serializer),
+        None => serializer.serialize_none(),
+    }
+}
+
 /// Deserializes an address from a hex string.
 pub(super) fn deserialize_address_from_hex<'de, D>(deserializer: D) -> Result<Address, D::Error>
 where

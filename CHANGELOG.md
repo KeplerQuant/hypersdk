@@ -46,6 +46,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Response`, `OkResponse`, `OrderResponseStatus`, and `ActionRequest` now derive `Clone`; `Response`, `OkResponse`, and `OrderResponseStatus` also derive `Serialize`
 - `OkResponse` gained `CreateSubAccount` and `CreateVault`, which carry the address the exchange assigns
 - All three signing paths (`sign`, `sign_sync`, `prehash`) now share one exhaustive match over `Action`, so adding an action is one edit instead of three
+- The live audits `deployer_action_shapes_are_still_accepted` and `undocumented_action_shapes_are_accepted` now also check that the exchange recovers the signing key's address. They only checked that payloads parsed, which is how the signing bugs below went unnoticed
+
+### Fixed
+
+- Signatures on L1 actions that carry an address. `alloy` encodes an `Address` as 20 raw bytes in msgpack while the exchange hashes it as a lowercase hex string, so these actions were signed over different bytes than the exchange hashes and were rejected as "User or API Wallet 0x... does not exist" with an address other than the signer's: `subAccountModify`, `subAccountTransfer`, `subAccountSpotTransfer`, `vaultModify`, `vaultDistribute`, `reserveRequestWeight` with a destination, `CValidatorAction` register and change-profile, and the deployer actions `setSubDeployers` (HIP-3 and HIP-4), `setFeeRecipient`, `registerAsset` and `registerAsset2` with an oracle updater, and `userGenesis`
+- `registerAsset` and `registerAsset2` send an unset `maxGas` and `schema` as `null`, which is how the exchange hashes them and how the Python SDK sends them. Omitting either recovered a different signer
 
 ### Dependencies
 

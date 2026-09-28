@@ -3522,7 +3522,9 @@ impl<'de> Deserialize<'de> for SubDeployerGrant {
 /// A deployer permission a HIP-3 DEX has delegated to sub-deployers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubDeployerPermission {
-    /// A `perpDeploy` action variant, e.g. `"setOracle"` or `"haltTrading"`.
+    /// A deployer action variant sent as a string: a `perpDeploy` variant such as
+    /// `"setOracle"`, or, in HIP-4 sub-deployer grants, an outcome action such as
+    /// `"settleOutcome"`.
     PerpDeploy(String),
     /// A HIP-3\* proxy-operation grant, sent as exactly `{"hip3Star": "<operation>"}`, e.g.
     /// `"order"` or `"modifyApproval"`. HIP-3\* venues are testnet-only.
@@ -3563,6 +3565,93 @@ impl<'de> Deserialize<'de> for SubDeployerPermission {
             (value, None) => Self::Other(value),
         })
     }
+}
+
+impl Serialize for SubDeployerPermission {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::PerpDeploy(action) => serializer.serialize_str(action),
+            Self::Hip3Star { action } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("hip3Star", action)?;
+                map.end()
+            }
+            Self::Other(raw) => raw.serialize(serializer),
+        }
+    }
+}
+
+impl From<&str> for SubDeployerPermission {
+    fn from(action: &str) -> Self {
+        Self::PerpDeploy(action.to_owned())
+    }
+}
+
+impl From<String> for SubDeployerPermission {
+    fn from(action: String) -> Self {
+        Self::PerpDeploy(action)
+    }
+}
+
+/// A user's state on every HIP-3\* venue that has approved them, from the `userStarState`
+/// info request. HIP-3\* venues are testnet-only.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserStarState {
+    /// One entry per venue that has approved the user, including venues that have since
+    /// removed the approval.
+    #[serde(deserialize_with = "deserialize_star_venues")]
+    pub dex_to_state: Vec<StarVenueState>,
+}
+
+/// A user's approval on one HIP-3\* venue.
+///
+/// Sent by the API as a `[dex, flags]` array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StarVenueState {
+    /// Perp DEX name.
+    pub dex: String,
+    /// The user's flags on the venue, or `None` if the venue has since removed the user's
+    /// approval.
+    pub flags: Option<StarUserFlags>,
+}
+
+impl<'de> Deserialize<'de> for StarVenueState {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (dex, flags) = <(String, Option<StarUserFlags>)>::deserialize(deserializer)?;
+        Ok(Self { dex, flags })
+    }
+}
+
+/// What an approved user may do on a HIP-3\* venue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarUserFlags {
+    /// Whether the user may only reduce positions.
+    pub is_reduce_only: bool,
+    /// Whether the user may deposit into and withdraw from the venue's backstop liquidator.
+    pub is_backstop_liquidator_deposit_allowed: bool,
+}
+
+/// The docs show `dexToState` as an object keyed by DEX name, but the exchange sends a list
+/// of `[dex, flags]` pairs. Both are accepted.
+fn deserialize_star_venues<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<StarVenueState>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Venues {
+        List(Vec<StarVenueState>),
+        Map(std::collections::BTreeMap<String, Option<StarUserFlags>>),
+    }
+
+    Ok(match Venues::deserialize(deserializer)? {
+        Venues::List(venues) => venues,
+        Venues::Map(venues) => venues
+            .into_iter()
+            .map(|(dex, flags)| StarVenueState { dex, flags })
+            .collect(),
+    })
 }
 
 /// Token details from `tokenDetails` info request.
@@ -4329,6 +4418,10 @@ pub(super) enum InfoRequest {
     /// Total net deposit for a HIP-3 DEX.
     PerpDexStatus {
         dex: String,
+    },
+    /// A user's approval state on every HIP-3* venue that has approved them.
+    UserStarState {
+        user: Address,
     },
     /// All DEXs' meta + asset contexts.
     AllPerpMetas,
@@ -5403,6 +5496,62 @@ mod tests {
     }
 
     #[test]
+    fn sub_deployer_permission_serializes_to_its_wire_shape() {
+        let to_json = |permission: SubDeployerPermission| serde_json::to_value(permission).unwrap();
+
+        assert_eq!(to_json("setOracle".into()), serde_json::json!("setOracle"));
+        assert_eq!(
+            to_json(SubDeployerPermission::Hip3Star {
+                action: "order".into()
+            }),
+            serde_json::json!({"hip3Star": "order"})
+        );
+        let raw = serde_json::json!({"somethingNew": [1, 2]});
+        assert_eq!(to_json(SubDeployerPermission::Other(raw.clone())), raw);
+    }
+
+    #[test]
+    fn user_star_state_accepts_the_live_and_documented_shapes() {
+        let flags = StarUserFlags {
+            is_reduce_only: false,
+            is_backstop_liquidator_deposit_allowed: true,
+        };
+        let expected = [
+            StarVenueState {
+                dex: "mock".into(),
+                flags: Some(flags),
+            },
+            StarVenueState {
+                dex: "sample".into(),
+                flags: None,
+            },
+        ];
+
+        // What the exchange sends: `[dex, flags]` pairs, where flags may be null.
+        let live: UserStarState = serde_json::from_str(
+            r#"{"dexToState": [
+                ["mock", {"isReduceOnly": false, "isBackstopLiquidatorDepositAllowed": true}],
+                ["sample", null]
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(live.dex_to_state, expected);
+
+        // What the docs show: an object keyed by DEX name.
+        let documented: UserStarState = serde_json::from_str(
+            r#"{"dexToState": {
+                "mock": {"isReduceOnly": false, "isBackstopLiquidatorDepositAllowed": true},
+                "sample": null
+            }}"#,
+        )
+        .unwrap();
+        assert_eq!(documented.dex_to_state, expected);
+
+        let none: UserStarState = serde_json::from_str(r#"{"dexToState": []}"#).unwrap();
+        assert!(none.dex_to_state.is_empty());
+    }
+
+    #[test]
     fn sub_deployer_permission_keeps_unknown_shapes_intact() {
         let parse = |json: &str| serde_json::from_str::<SubDeployerPermission>(json).unwrap();
 
@@ -5798,6 +5947,7 @@ mod tests {
             InfoRequest::PerpDexStatus {
                 dex: "flx".to_string(),
             },
+            InfoRequest::UserStarState { user: USER },
             InfoRequest::AllPerpMetas,
             InfoRequest::PerpAnnotation {
                 coin: "BTC".to_string(),
@@ -6349,6 +6499,14 @@ mod tests {
             assert_json(
                 InfoRequest::UserVaultEquities { user: USER },
                 serde_json::json!({"type": "userVaultEquities", "user": "0x0000000000000000000000000000000000001234"}),
+            );
+        }
+
+        #[test]
+        fn user_star_state() {
+            assert_json(
+                InfoRequest::UserStarState { user: USER },
+                serde_json::json!({"type": "userStarState", "user": "0x0000000000000000000000000000000000001234"}),
             );
         }
 

@@ -81,7 +81,7 @@ use crate::hypercore::{
         PreTransferCheck, PredictedFundingVenue, ScheduleCancel, SendAsset, SendToken, SpotSend,
         SubAccount, TimeInForce, TokenDetails, Trade, TwapSliceFill, UsdSend, UsdcRouting,
         UserBalance, UserFees, UserFundingEntry, UserRateLimit, UserRole, UserSetAbstractionAction,
-        UserVaultEquity, VaultDetails,
+        UserStarState, UserVaultEquity, VaultDetails,
     },
 };
 
@@ -2278,6 +2278,17 @@ impl Client {
             .send_info_request("perp_dex_details", &InfoRequest::PerpDexs)
             .await?;
         Ok(PerpDexDetails::from_response(dexes))
+    }
+
+    /// Returns a user's approval state on every HIP-3\* venue that has approved them. Venues
+    /// that have since removed the approval are listed with no flags.
+    ///
+    /// HIP-3\* venues are testnet-only.
+    ///
+    /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/hip-3-deployer-actions#reading-state>
+    pub async fn user_star_state(&self, user: Address) -> Result<UserStarState> {
+        let req = InfoRequest::UserStarState { user };
+        self.send_info_request("user_star_state", &req).await
     }
 
     /// Returns all DEXs' meta + asset contexts.

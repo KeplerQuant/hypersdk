@@ -118,11 +118,15 @@ pub struct UserGenesis {
     /// Token index.
     pub token: u32,
     /// `(user, wei)` pairs, sorted by user.
+    #[serde(serialize_with = "crate::hypercore::utils::serialize_address_pairs_as_hex")]
     pub user_and_wei: Vec<(Address, String)>,
     /// `(existing token, total wei for its holders)` pairs, sorted by token.
     pub existing_token_and_wei: Vec<(u32, String)>,
     /// `(user, is_blacklisted)` pairs, sorted by user.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::hypercore::utils::serialize_option_address_pairs_as_hex"
+    )]
     pub blacklist_users: Option<Vec<(Address, bool)>>,
 }
 
@@ -453,14 +457,14 @@ pub struct RegisterAsset2 {
     /// `Some(0)` requests a reserve deployment, which succeeds at the current auction price
     /// even after the auction ends. A reserve deployment is consumed whether or not the
     /// auction has completed, so query the auction status first.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// Sent as `null` when `None`: the exchange hashes it that way.
     pub max_gas: Option<u64>,
     /// The asset being listed.
     pub asset_request: RegisterAssetRequest2,
     /// Perp DEX name, 2 to 4 lowercase characters.
     pub dex: String,
-    /// New DEX parameters. Present only when creating the DEX.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// New DEX parameters. Present only when creating the DEX; sent as `null` otherwise.
     pub schema: Option<PerpDexSchemaInput>,
 }
 
@@ -469,14 +473,14 @@ pub struct RegisterAsset2 {
 #[serde(rename_all = "camelCase")]
 pub struct RegisterAsset {
     /// Max gas in native token wei. `None` uses the current deploy auction price.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// Sent as `null` when `None`: the exchange hashes it that way.
     pub max_gas: Option<u64>,
     /// The asset being listed.
     pub asset_request: RegisterAssetRequest,
     /// Perp DEX name, 2 to 4 lowercase characters.
     pub dex: String,
-    /// New DEX parameters. Present only when creating the DEX.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// New DEX parameters. Present only when creating the DEX; sent as `null` otherwise.
     pub schema: Option<PerpDexSchemaInput>,
 }
 
@@ -523,8 +527,12 @@ pub struct PerpDexSchemaInput {
     pub full_name: String,
     /// Collateral token index.
     pub collateral_token: u32,
-    /// Address allowed to push oracle updates. `None` means the deployer.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Address allowed to push oracle updates. `None` means the deployer, and is sent as
+    /// `null`.
+    #[serde(
+        serialize_with = "crate::hypercore::utils::serialize_option_address_as_hex",
+        default
+    )]
     pub oracle_updater: Option<Address>,
 }
 
@@ -585,6 +593,10 @@ pub struct SetFeeRecipient {
     /// Perp DEX name.
     pub dex: String,
     /// Address receiving the fees.
+    #[serde(
+        serialize_with = "crate::hypercore::utils::serialize_address_as_hex",
+        deserialize_with = "crate::hypercore::utils::deserialize_address_from_hex"
+    )]
     pub fee_recipient: Address,
 }
 
@@ -605,6 +617,10 @@ pub struct SubDeployerInput {
     /// The [`PerpDeployAction`] variant being delegated, e.g. `"haltTrading"` or `"setOracle"`.
     pub variant: String,
     /// The sub-deployer.
+    #[serde(
+        serialize_with = "crate::hypercore::utils::serialize_address_as_hex",
+        deserialize_with = "crate::hypercore::utils::deserialize_address_from_hex"
+    )]
     pub user: Address,
     /// `true` adds the sub-deployer to the authorized set, `false` removes it.
     pub allowed: bool,
@@ -851,6 +867,9 @@ mod tests {
         let signer = PrivateKeySigner::random();
         let client = hypercore::testnet();
         let base = chrono::Utc::now().timestamp_millis() as u64;
+        // Mixed-case hex, so a checksummed or byte encoding cannot pass by accident.
+        const USER: Address =
+            alloy::primitives::address!("0x5e89b26d8d66da9888c835c9bfcc2aa51813e152");
 
         let cases: Vec<(&str, Action)> = vec![
             ("claimRewards", Action::ClaimRewards),
@@ -935,12 +954,19 @@ mod tests {
                 })),
             ),
             (
+                "perpDeploy/setFeeRecipient",
+                Action::PerpDeploy(PerpDeployAction::SetFeeRecipient(SetFeeRecipient {
+                    dex: "zzz".into(),
+                    fee_recipient: USER,
+                })),
+            ),
+            (
                 "perpDeploy/setSubDeployers",
                 Action::PerpDeploy(PerpDeployAction::SetSubDeployers(SetSubDeployers {
                     dex: "zzz".into(),
                     sub_deployers: vec![SubDeployerInput {
                         variant: "setOracle".into(),
-                        user: Address::ZERO,
+                        user: USER,
                         allowed: true,
                     }],
                 })),
@@ -971,6 +997,40 @@ mod tests {
                 })),
             ),
             (
+                "perpDeploy/registerAsset2 with schema",
+                Action::PerpDeploy(PerpDeployAction::RegisterAsset2(RegisterAsset2 {
+                    max_gas: Some(1),
+                    asset_request: RegisterAssetRequest2 {
+                        coin: "ABC".into(),
+                        sz_decimals: 2,
+                        oracle_px: "1.0".into(),
+                        margin_table_id: 50,
+                        margin_mode: MarginMode::Normal,
+                    },
+                    dex: "zzz".into(),
+                    schema: Some(PerpDexSchemaInput {
+                        full_name: "zzz".into(),
+                        collateral_token: 0,
+                        oracle_updater: Some(USER),
+                    }),
+                })),
+            ),
+            (
+                "perpDeploy/registerAsset",
+                Action::PerpDeploy(PerpDeployAction::RegisterAsset(RegisterAsset {
+                    max_gas: None,
+                    asset_request: RegisterAssetRequest {
+                        coin: "ABC".into(),
+                        sz_decimals: 2,
+                        oracle_px: "1.0".into(),
+                        margin_table_id: 50,
+                        only_isolated: false,
+                    },
+                    dex: "zzz".into(),
+                    schema: None,
+                })),
+            ),
+            (
                 "perpDeploy/disableDex",
                 Action::PerpDeploy(PerpDeployAction::DisableDex("zzz".into())),
             ),
@@ -990,9 +1050,9 @@ mod tests {
                 "spotDeploy/userGenesis",
                 Action::SpotDeploy(SpotDeployAction::UserGenesis(UserGenesis {
                     token: 99999,
-                    user_and_wei: vec![],
+                    user_and_wei: vec![(USER, "1".into())],
                     existing_token_and_wei: vec![],
-                    blacklist_users: None,
+                    blacklist_users: Some(vec![(USER, true)]),
                 })),
             ),
             (
@@ -1146,6 +1206,7 @@ mod tests {
             ),
         ];
 
+        let mut failures = Vec::new();
         for (i, (label, action)) in cases.into_iter().enumerate() {
             let nonce = base + i as u64;
             let req = action
@@ -1160,13 +1221,21 @@ mod tests {
                 out.chars().take(150).collect::<String>()
             );
 
-            assert!(
-                !out.contains("Failed to deserialize"),
-                "{label}: the exchange no longer parses this action shape: {out}"
-            );
+            if out.contains("Failed to deserialize") {
+                failures.push(format!("{label}: the exchange no longer parses this shape"));
+            }
+            // Parsing is not enough: the signature covers the msgpack encoding, so a field
+            // encoded differently from how the exchange hashes it recovers another address.
+            if let Some(recovered) =
+                crate::hypercore::api::recovered_other_signer(&out, signer.address())
+            {
+                failures.push(format!("{label}: signature recovered to {recovered}"));
+            }
 
             tokio::time::sleep(std::time::Duration::from_millis(120)).await;
         }
+
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     /// Sorted tuple lists must survive the round trip through msgpack untouched, since the
@@ -1191,10 +1260,10 @@ mod tests {
         );
     }
 
-    /// Optional fields are dropped rather than sent as null, which keeps the signing hash
-    /// identical to what the reference SDKs produce.
+    /// The exchange hashes an unset `maxGas` and `schema` as `null`, as the Python SDK sends
+    /// them. Omitting either makes the signature recover to a different address.
     #[test]
-    fn absent_optionals_are_omitted() {
+    fn unset_register_asset_fields_are_sent_as_null() {
         let action = Action::PerpDeploy(PerpDeployAction::RegisterAsset2(RegisterAsset2 {
             max_gas: None,
             asset_request: RegisterAssetRequest2 {
@@ -1213,6 +1282,7 @@ mod tests {
             json!({
                 "type": "perpDeploy",
                 "registerAsset2": {
+                    "maxGas": null,
                     "assetRequest": {
                         "coin": "ABC",
                         "szDecimals": 2,
@@ -1220,7 +1290,8 @@ mod tests {
                         "marginTableId": 50,
                         "marginMode": "normal"
                     },
-                    "dex": "abc"
+                    "dex": "abc",
+                    "schema": null
                 }
             })
         );

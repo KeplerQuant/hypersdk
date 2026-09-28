@@ -2280,7 +2280,8 @@ impl Client {
         Ok(PerpDexDetails::from_response(dexes))
     }
 
-    /// Returns a user's approval state on every HIP-3\* venue that has approved them.
+    /// Returns a user's approval state on every HIP-3\* venue that has approved them. Venues
+    /// that have since removed the approval are listed with no flags.
     ///
     /// HIP-3\* venues are testnet-only.
     ///

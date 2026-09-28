@@ -656,6 +656,11 @@ pub struct Hip3StarAction {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum Hip3StarOperation {
+    /// Update the venue's oracle prices.
+    ///
+    /// Needs its own grant, `{"hip3Star": "setOracle"}`: the regular `"setOracle"` grant,
+    /// including the one given to the oracle updater, does not cover it.
+    SetOracle(Hip3StarSetOracle),
     /// Apply an operation to one user of the venue, sent as `{"proxy": [user, operation]}`.
     Proxy(
         #[serde(
@@ -675,8 +680,9 @@ pub enum Hip3StarOperation {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum Hip3StarProxyOperation {
-    /// `true` adds the user to the allowlist, `false` removes them. Both are no-ops when the
-    /// user is already in that state; re-approving keeps the user's flags.
+    /// `true` adds the user to the allowlist, `false` removes them and clears their flags.
+    /// Both are no-ops when the user is already in that state, so re-approving an approved
+    /// user keeps their flags; a removed user who is approved again starts with the defaults.
     ModifyApproval(bool),
     /// `true` lets an approved user deposit into and withdraw from the venue's backstop
     /// liquidator via `hip3LiquidatorTransfer`; `false` revokes it.
@@ -692,6 +698,17 @@ pub enum Hip3StarProxyOperation {
     Order(BatchOrder),
     /// Move collateral from the user's account on the venue to another account on it.
     SendAsset(Hip3StarSendAsset),
+}
+
+/// Oracle prices for [`Hip3StarOperation::SetOracle`].
+///
+/// HIP-3\* venues send only spot oracle prices. The exchange derives each asset's external
+/// perp price from the main-DEX asset of the same name, and its mark price onchain.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Hip3StarSetOracle {
+    /// `(asset, oracle price)` pairs, sorted by asset.
+    pub oracle_pxs: Vec<(String, String)>,
 }
 
 /// Which assets [`Hip3StarProxyOperation::CancelAll`] cancels on.
@@ -1166,6 +1183,15 @@ mod tests {
                 })),
             ),
             (
+                "perpDeploy/star setOracle",
+                Action::PerpDeploy(PerpDeployAction::Star(Hip3StarAction {
+                    dex: "zzz".into(),
+                    operation: Hip3StarOperation::SetOracle(Hip3StarSetOracle {
+                        oracle_pxs: vec![("zzz:BTC".into(), "100000.0".into())],
+                    }),
+                })),
+            ),
+            (
                 "perpDeploy/star modifyApproval",
                 star(Hip3StarProxyOperation::ModifyApproval(true)),
             ),
@@ -1494,6 +1520,26 @@ mod tests {
                 amount: dec!(100.0),
             }))["star"]["operation"]["proxy"][1],
             json!({"sendAsset": {"destination": "0x0000000000000000000000000000000000000001", "amount": "100.0"}})
+        );
+
+        assert_eq!(
+            serde_json::to_value(Action::PerpDeploy(PerpDeployAction::Star(Hip3StarAction {
+                dex: "test".into(),
+                operation: Hip3StarOperation::SetOracle(Hip3StarSetOracle {
+                    oracle_pxs: vec![
+                        ("test:BTC".into(), "100000.0".into()),
+                        ("test:ETH".into(), "4000.0".into()),
+                    ],
+                }),
+            })))
+            .unwrap(),
+            json!({
+                "type": "perpDeploy",
+                "star": {
+                    "dex": "test",
+                    "operation": {"setOracle": {"oraclePxs": [["test:BTC", "100000.0"], ["test:ETH", "4000.0"]]}}
+                }
+            })
         );
 
         let grant = Action::PerpDeploy(PerpDeployAction::SetSubDeployers(SetSubDeployers {

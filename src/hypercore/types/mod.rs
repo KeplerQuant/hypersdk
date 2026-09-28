@@ -3593,12 +3593,13 @@ impl From<String> for SubDeployerPermission {
     }
 }
 
-/// A user's state on the HIP-3\* venues that have approved them, from the `userStarState`
+/// A user's state on every HIP-3\* venue that has approved them, from the `userStarState`
 /// info request. HIP-3\* venues are testnet-only.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserStarState {
-    /// One entry per venue that has approved the user.
+    /// One entry per venue that has approved the user, including venues that have since
+    /// removed the approval.
     #[serde(deserialize_with = "deserialize_star_venues")]
     pub dex_to_state: Vec<StarVenueState>,
 }
@@ -3610,7 +3611,8 @@ pub struct UserStarState {
 pub struct StarVenueState {
     /// Perp DEX name.
     pub dex: String,
-    /// The user's flags on the venue. The exchange sends `null` for some approved users.
+    /// The user's flags on the venue, or `None` if the venue has since removed the user's
+    /// approval.
     pub flags: Option<StarUserFlags>,
 }
 

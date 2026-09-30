@@ -317,6 +317,20 @@ The same token syntax works for supply, withdrawal, and status.
 Omitting `--amount` supplies or withdraws the maximum.
 Query the multisig position with `hypecli earn status --user <MULTISIG_ADDRESS>`.
 
+##### Converting Back to a Normal User
+
+Convert a multisig account back to a normal user:
+
+```bash
+hypecli to-normal-user \
+  --multi-sig-addr 0xYourMultiSigWallet... \
+  --keystore my-wallet
+```
+
+The command collects the required signatures through the same local or P2P
+flow as other multisig actions. The older
+`hypecli multisig convert-to-normal-user` command remains supported.
+
 ##### Multisig on Other Actions
 
 The same `--multi-sig-addr <ADDRESS>` and `--local` options work on:

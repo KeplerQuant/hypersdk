@@ -25,7 +25,7 @@ use earn::EarnCmd;
 use hypersdk::hypercore::Chain;
 use markets::{DexesCmd, PerpsCmd, SpotCmd};
 use morpho::{MorphoApyCmd, MorphoPositionCmd, MorphoVaultApyCmd};
-use multisig::MultiSigCmd;
+use multisig::{MultiSigCmd, ToNormalUserCmd};
 use orders::OrderCmd;
 use orders_list::OrdersCmd;
 use outcome::OutcomeCmd;
@@ -78,6 +78,8 @@ enum Command {
     Multisig(MultiSigCmd),
     /// Convert a regular user to a multi-sig user
     ToMultisig(ToMultiSigCmd),
+    /// Convert a multi-sig user back to a normal user
+    ToNormalUser(ToNormalUserCmd),
     /// Order management (place and cancel orders)
     #[command(subcommand)]
     Order(OrderCmd),
@@ -118,6 +120,7 @@ impl Command {
             Self::MorphoVaultApy(cmd) => cmd.run().await,
             Self::Multisig(cmd) => cmd.run().await,
             Self::ToMultisig(cmd) => cmd.run().await,
+            Self::ToNormalUser(cmd) => cmd.run().await,
             Self::Order(cmd) => cmd.run().await,
             Self::Outcome(cmd) => cmd.run().await,
             Self::Subscribe(cmd) => cmd.run().await,
@@ -453,10 +456,12 @@ Multi-Sig Update Configuration:
     --threshold 2
 
 Convert Multi-Sig to Normal User:
-  hypecli multisig convert-to-normal-user \
+  hypecli to-normal-user \
     --chain mainnet \
     --private-key <HEX> \
     --multi-sig-addr <MULTISIG_ADDRESS>
+
+  The older `hypecli multisig convert-to-normal-user` command remains supported.
 
 GOSSIP PRIORITY AUCTION COMMANDS
 --------------------------------

@@ -66,9 +66,9 @@ use crate::hypercore::{
         OkResponse, Response, SendToEvmWithDataAction, SignersConfig, SpotUserAction,
         StakingLinkDisableTradingUserAction, SubAccountModify, SubAccountSpotTransfer,
         SubAccountTransfer, ToggleSpotDusting, TokenDelegateAction, TopUpIsolatedOnlyMargin,
-        TwapOrderParams, UpdateIsolatedMargin, UpdateLeverage, UsdClassTransferAction,
-        UserOutcomeAction, UserPortfolioMarginAction, ValidatorL1Stream, VaultDistribute,
-        VaultModify, VaultTransfer, Withdraw3Action,
+        TrailingStop, TwapOrderParams, UpdateIsolatedMargin, UpdateLeverage,
+        UsdClassTransferAction, UserOutcomeAction, UserPortfolioMarginAction, ValidatorL1Stream,
+        VaultDistribute, VaultModify, VaultTransfer, Withdraw3Action,
     },
     deploy::{ActivateOutcomeDeployer, OutcomeDeploy, PerpDeployAction, SpotDeployAction},
     mainnet_url, testnet_url,
@@ -2625,6 +2625,26 @@ impl Client {
         };
         let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
         self.send(req).await
+    }
+
+    /// Place a native trailing stop and return the ID of the order it places.
+    ///
+    /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#place-a-trailing-stop-order>
+    pub async fn trailing_stop<S: SignerSync>(
+        &self,
+        signer: &S,
+        trailing_stop: TrailingStop,
+        nonce: u64,
+        vault_address: Option<Address>,
+        expires_after: Option<DateTime<Utc>>,
+    ) -> Result<u64> {
+        let action = Action::TrailingStop(trailing_stop);
+        let req = action.sign_sync(signer, nonce, vault_address, expires_after, self.chain)?;
+        match self.send(req).await? {
+            Response::Ok(OkResponse::TrailingStop { oid }) => Ok(oid),
+            Response::Err(err) => Err(ApiError(err).into()),
+            other => Err(ApiError(format!("unexpected response: {other:?}")).into()),
+        }
     }
 
     /// Withdraw to Arbitrum L1.

@@ -486,12 +486,46 @@ pub enum OkResponse {
     Cancel {
         statuses: Vec<OrderResponseStatus>,
     },
+    /// Reply to a TWAP order. A rejected TWAP is still a `status: ok` reply, with the
+    /// reason in [`TwapOrderStatus::Error`].
+    TwapOrder {
+        status: TwapOrderStatus,
+    },
+    /// Reply to a TWAP cancel. A failed cancel is still a `status: ok` reply, with the
+    /// reason in [`TwapCancelStatus::Error`].
+    TwapCancel {
+        status: TwapCancelStatus,
+    },
     /// Address of the sub-account just created. `data` is the bare address.
     CreateSubAccount(Address),
     /// Address of the vault just created. `data` is the bare address.
     CreateVault(Address),
     // should be ok?
     Default,
+}
+
+/// Outcome of a TWAP order, from the `twapOrder` reply.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TwapOrderStatus {
+    /// The TWAP is running.
+    Running {
+        /// ID to cancel it with.
+        #[serde(rename = "twapId")]
+        twap_id: u64,
+    },
+    /// The exchange rejected the TWAP.
+    Error(String),
+}
+
+/// Outcome of a TWAP cancel, from the `twapCancel` reply.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TwapCancelStatus {
+    /// The TWAP was canceled.
+    Success,
+    /// The cancel failed, e.g. because the TWAP was already canceled or filled.
+    Error(String),
 }
 
 impl Response {
@@ -1959,6 +1993,46 @@ mod tests {
     use alloy::primitives::address;
 
     use super::*;
+
+    /// TWAP replies carry their own `type`, which used to fail to deserialize, so a TWAP
+    /// that the exchange accepted was reported as an error. These are the documented replies.
+    #[test]
+    fn twap_replies_deserialize() {
+        let parse = |text: &str| serde_json::from_str::<Response>(text).unwrap();
+
+        assert!(matches!(
+            parse(
+                r#"{"status":"ok","response":{"type":"twapOrder","data":{"status":{"running":{"twapId":77738308}}}}}"#
+            ),
+            Response::Ok(OkResponse::TwapOrder {
+                status: TwapOrderStatus::Running { twap_id: 77738308 }
+            })
+        ));
+        assert!(matches!(
+            parse(
+                r#"{"status":"ok","response":{"type":"twapOrder","data":{"status":{"error":"Invalid TWAP duration: 1 min(s)"}}}}"#
+            ),
+            Response::Ok(OkResponse::TwapOrder {
+                status: TwapOrderStatus::Error(error)
+            }) if error == "Invalid TWAP duration: 1 min(s)"
+        ));
+        assert!(matches!(
+            parse(
+                r#"{"status":"ok","response":{"type":"twapCancel","data":{"status":"success"}}}"#
+            ),
+            Response::Ok(OkResponse::TwapCancel {
+                status: TwapCancelStatus::Success
+            })
+        ));
+        assert!(matches!(
+            parse(
+                r#"{"status":"ok","response":{"type":"twapCancel","data":{"status":{"error":"TWAP was never placed, already canceled, or filled."}}}}"#
+            ),
+            Response::Ok(OkResponse::TwapCancel {
+                status: TwapCancelStatus::Error(_)
+            })
+        ));
+    }
 
     /// The exchange hashes addresses as lowercase hex strings, but `alloy` encodes an `Address`
     /// as 20 raw bytes in msgpack. Every address inside an L1 action must be serialized

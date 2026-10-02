@@ -48,6 +48,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `OkResponse` gained `CreateSubAccount` and `CreateVault`, which carry the address the exchange assigns
 - **Breaking**: `SubDeployerInput::variant` is a `SubDeployerPermission` instead of a `String`, so it can carry HIP-3\* grants such as `{"hip3Star": "order"}`. `"setOracle".into()` still works
 - **Breaking**: `PerpDexSchemaInput` gained an `is_star` field, so struct literals need `is_star: false`
+- **Breaking**: HIP-4 `outcomeDeploy` actions carry the deployer's `venue` and nest the variant under `operation`, as the exchange requires: `Action::OutcomeDeploy` and `HttpClient::outcome_deploy` take an `OutcomeDeploy { venue, operation }`. Mainnet and testnet both rejected the old `{"type": "outcomeDeploy", "<variant>": ...}` shape with HTTP 422, so no outcome could be deployed or settled
 - All three signing paths (`sign`, `sign_sync`, `prehash`) now share one exhaustive match over `Action`, so adding an action is one edit instead of three
 - The live audits `deployer_action_shapes_are_still_accepted` and `undocumented_action_shapes_are_accepted` now also check that the exchange recovers the signing key's address. They only checked that payloads parsed, which is how the signing bugs below went unnoticed
 

@@ -203,9 +203,9 @@ pub enum Action {
     /// HIP-3 perp DEX deployment and operation.
     #[from(skip)]
     PerpDeploy(deploy::PerpDeployAction),
-    /// HIP-4 outcome market deployment and settlement.
+    /// HIP-4 outcome market deployment and settlement, for one venue.
     #[from(skip)]
-    OutcomeDeploy(deploy::OutcomeDeployAction),
+    OutcomeDeploy(deploy::OutcomeDeploy),
     /// HIP-4 outcome deployer activation.
     #[from(skip)]
     ActivateOutcomeDeployer(deploy::ActivateOutcomeDeployer),

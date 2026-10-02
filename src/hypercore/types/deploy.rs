@@ -243,10 +243,32 @@ pub struct OutcomeVenue {
     pub venue_name: String,
 }
 
-/// HIP-4 outcome market deployment and settlement.
+/// A HIP-4 outcome deployer action, sent as
+/// `{"type": "outcomeDeploy", "venue": "<venue>", "operation": {"<variant>": {...}}}`.
 ///
-/// Sent as its own action, `{"type": "outcomeDeploy", "<variant>": {...}}`. It used to be
-/// nested under `spotDeploy` as an `outcome` field; the exchange stopped parsing that shape.
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/hip-4-deployer-actions#action-format>
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeDeploy {
+    /// The deployer's venue name. A sub-deployer passes the venue of the deployer it acts
+    /// for, and settlements can only target that deployer's outcomes and questions.
+    pub venue: String,
+    /// The deployment or settlement to perform.
+    pub operation: OutcomeDeployAction,
+}
+
+impl OutcomeDeploy {
+    /// Builds an action for the given venue.
+    #[must_use]
+    pub fn new(venue: impl Into<String>, operation: OutcomeDeployAction) -> Self {
+        Self {
+            venue: venue.into(),
+            operation,
+        }
+    }
+}
+
+/// HIP-4 outcome market deployment and settlement, carried by [`OutcomeDeploy`].
 ///
 /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/hip-4-deployer-actions#action-reference>
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -269,8 +291,8 @@ pub enum OutcomeDeployAction {
     /// Each [`SubDeployerInput::variant`] names an [`OutcomeDeployAction`] variant. The
     /// `settleQuestion` grant authorizes [`SettleQuestion2`](Self::SettleQuestion2).
     ///
-    /// Unlike the HIP-3 form this carries a bare list, with no DEX name: outcome deployers
-    /// have exactly one venue.
+    /// Unlike the HIP-3 form this carries a bare list, with no DEX name: the venue is the
+    /// one in [`OutcomeDeploy::venue`].
     SetSubDeployers(Vec<SubDeployerInput>),
 }
 
@@ -858,11 +880,12 @@ mod tests {
         );
     }
 
-    /// `outcomeDeploy` is its own action, not a field of `spotDeploy`.
+    /// `outcomeDeploy` is its own action, carrying the venue and the operation, as documented.
     #[test]
     fn outcome_deploy_is_a_top_level_action() {
-        let action = Action::OutcomeDeploy(
-            OutcomeDeployAction::RegisterStandaloneOutcomeFromTemplate(TemplateInstance::new(
+        let outcome = |operation| Action::OutcomeDeploy(OutcomeDeploy::new("ab", operation));
+        let action = outcome(OutcomeDeployAction::RegisterStandaloneOutcomeFromTemplate(
+            TemplateInstance::new(
                 "abc",
                 [
                     ("underlying".to_string(), "ABC".to_string()),
@@ -870,22 +893,25 @@ mod tests {
                     ("target".to_string(), "100".to_string()),
                 ],
                 dec!(1),
-            )),
-        );
+            ),
+        ));
 
         // Keywords are sorted on construction, as the exchange requires.
         assert_eq!(
             serde_json::to_value(&action).unwrap(),
             json!({
                 "type": "outcomeDeploy",
-                "registerStandaloneOutcomeFromTemplate": {
-                    "id": "abc",
-                    "keywordToValue": [
-                        ["expiry", "20260801-0600"],
-                        ["target", "100"],
-                        ["underlying", "ABC"]
-                    ],
-                    "deployerFeeScale": "1"
+                "venue": "ab",
+                "operation": {
+                    "registerStandaloneOutcomeFromTemplate": {
+                        "id": "abc",
+                        "keywordToValue": [
+                            ["expiry", "20260801-0600"],
+                            ["target", "100"],
+                            ["underlying", "ABC"]
+                        ],
+                        "deployerFeeScale": "1"
+                    }
                 }
             })
         );
@@ -894,23 +920,27 @@ mod tests {
     /// The HIP-4 sub-deployer grant carries a bare list, unlike the HIP-3 one.
     #[test]
     fn outcome_set_sub_deployers_has_no_dex() {
-        let action = Action::OutcomeDeploy(OutcomeDeployAction::SetSubDeployers(vec![
-            SubDeployerInput {
+        let action = Action::OutcomeDeploy(OutcomeDeploy::new(
+            "ab",
+            OutcomeDeployAction::SetSubDeployers(vec![SubDeployerInput {
                 variant: "settleOutcome".into(),
                 user: Address::ZERO,
                 allowed: true,
-            },
-        ]));
+            }]),
+        ));
 
         assert_eq!(
             serde_json::to_value(&action).unwrap(),
             json!({
                 "type": "outcomeDeploy",
-                "setSubDeployers": [{
-                    "variant": "settleOutcome",
-                    "user": "0x0000000000000000000000000000000000000000",
-                    "allowed": true
-                }]
+                "venue": "ab",
+                "operation": {
+                    "setSubDeployers": [{
+                        "variant": "settleOutcome",
+                        "user": "0x0000000000000000000000000000000000000000",
+                        "allowed": true
+                    }]
+                }
             })
         );
     }
@@ -978,6 +1008,7 @@ mod tests {
         // Mixed-case hex, so a checksummed or byte encoding cannot pass by accident.
         const USER: Address =
             alloy::primitives::address!("0x5e89b26d8d66da9888c835c9bfcc2aa51813e152");
+        let outcome = |operation| Action::OutcomeDeploy(OutcomeDeploy::new("zz", operation));
         let star = |operation| {
             Action::PerpDeploy(PerpDeployAction::Star(Hip3StarAction {
                 dex: "zzz".into(),
@@ -1340,7 +1371,7 @@ mod tests {
             ),
             (
                 "outcomeDeploy/registerStandalone",
-                Action::OutcomeDeploy(OutcomeDeployAction::RegisterStandaloneOutcomeFromTemplate(
+                outcome(OutcomeDeployAction::RegisterStandaloneOutcomeFromTemplate(
                     TemplateInstance::new(
                         "abc",
                         [("expiry".to_string(), "20260801-0600".to_string())],
@@ -1350,7 +1381,7 @@ mod tests {
             ),
             (
                 "outcomeDeploy/registerQuestion",
-                Action::OutcomeDeploy(OutcomeDeployAction::RegisterQuestionFromTemplate(
+                outcome(OutcomeDeployAction::RegisterQuestionFromTemplate(
                     RegisterQuestionFromTemplate {
                         question_template_instance: TemplateInstance::new(
                             "abc",
@@ -1366,7 +1397,7 @@ mod tests {
             ),
             (
                 "outcomeDeploy/registerAndAssociate",
-                Action::OutcomeDeploy(
+                outcome(
                     OutcomeDeployAction::RegisterAndAssociateNamedOutcomeFromTemplate(
                         RegisterAndAssociateNamedOutcome {
                             question: 3,
@@ -1380,7 +1411,7 @@ mod tests {
             ),
             (
                 "outcomeDeploy/settleOutcome",
-                Action::OutcomeDeploy(OutcomeDeployAction::SettleOutcome(OutcomeSettlement {
+                outcome(OutcomeDeployAction::SettleOutcome(OutcomeSettlement {
                     outcome: 7,
                     settle_fraction: dec!(1),
                     details: String::new(),
@@ -1390,7 +1421,7 @@ mod tests {
             ),
             (
                 "outcomeDeploy/settleQuestion2",
-                Action::OutcomeDeploy(OutcomeDeployAction::SettleQuestion2(SettleQuestion2 {
+                outcome(OutcomeDeployAction::SettleQuestion2(SettleQuestion2 {
                     question: 3,
                     outcome_settlements: vec![OutcomeSettlement {
                         outcome: 11,
@@ -1404,7 +1435,7 @@ mod tests {
             ),
             (
                 "outcomeDeploy/setSubDeployers",
-                Action::OutcomeDeploy(OutcomeDeployAction::SetSubDeployers(vec![
+                outcome(OutcomeDeployAction::SetSubDeployers(vec![
                     SubDeployerInput {
                         variant: "settleOutcome".into(),
                         user: Address::ZERO,

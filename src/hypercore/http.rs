@@ -70,7 +70,7 @@ use crate::hypercore::{
         UserOutcomeAction, UserPortfolioMarginAction, ValidatorL1Stream, VaultDistribute,
         VaultModify, VaultTransfer, Withdraw3Action,
     },
-    deploy::{ActivateOutcomeDeployer, OutcomeDeployAction, PerpDeployAction, SpotDeployAction},
+    deploy::{ActivateOutcomeDeployer, OutcomeDeploy, PerpDeployAction, SpotDeployAction},
     mainnet_url, testnet_url,
     types::{
         AbstractionMode, ActiveAssetData, AgentSendAsset, BasicOrder, BatchCancel,
@@ -2797,7 +2797,7 @@ impl Client {
         self.send(req).await?.into_default()
     }
 
-    /// Send a HIP-4 outcome deployer action.
+    /// Send a HIP-4 outcome deployer action for a venue.
     ///
     /// Lists of tuples must already be sorted, since the signature covers their encoding.
     ///
@@ -2805,7 +2805,7 @@ impl Client {
     pub async fn outcome_deploy<S: SignerSync>(
         &self,
         signer: &S,
-        action: OutcomeDeployAction,
+        action: OutcomeDeploy,
         nonce: u64,
         vault_address: Option<Address>,
         expires_after: Option<DateTime<Utc>>,

@@ -1792,6 +1792,14 @@ pub enum OrderType {
     TakeProfitMarket,
     #[serde(rename = "Take Profit Limit")]
     TakeProfitLimit,
+    #[serde(rename = "Trailing Stop Market")]
+    TrailingStopMarket,
+    #[serde(rename = "Twap Slice")]
+    TwapSlice,
+    #[serde(rename = "Vault Close")]
+    VaultClose,
+    #[serde(rename = "Spot Dust Conversion")]
+    SpotDustConversion,
 }
 
 /// Time‑in‑force.
@@ -1836,6 +1844,8 @@ pub enum TimeInForce {
     Gtc,
     /// Frontend market order type
     FrontendMarket,
+    /// Reported on liquidation orders in order history. Not accepted when placing an order.
+    LiquidationMarket,
 }
 
 /// Order status.
@@ -1928,8 +1938,12 @@ pub enum OrderStatus {
     DelistedCanceled,
     /// Position was liquidated
     LiquidatedCanceled,
+    /// Outcome market settled
+    OutcomeSettledCanceled,
     /// User-scheduled cancellation
     ScheduledCancel,
+    /// Cancelled by an internal error
+    InternalCancel,
     /// Price doesn't match tick size
     TickRejected,
     /// Order value below minimum
@@ -1960,6 +1974,8 @@ pub enum OrderStatus {
     OracleRejected,
     /// Would exceed max position
     PerpMaxPositionRejected,
+    /// Would exceed the open order limit
+    TooManyOpenOrdersRejected,
 }
 
 impl OrderStatus {
@@ -2018,7 +2034,9 @@ impl OrderStatus {
                 | OrderStatus::SiblingFilledCanceled
                 | OrderStatus::DelistedCanceled
                 | OrderStatus::LiquidatedCanceled
+                | OrderStatus::OutcomeSettledCanceled
                 | OrderStatus::ScheduledCancel
+                | OrderStatus::InternalCancel
                 | OrderStatus::IocCancelRejected
         )
     }
@@ -2053,6 +2071,7 @@ impl OrderStatus {
                 | OrderStatus::InsufficientSpotBalanceRejected
                 | OrderStatus::OracleRejected
                 | OrderStatus::PerpMaxPositionRejected
+                | OrderStatus::TooManyOpenOrdersRejected
         )
     }
 }
@@ -5286,6 +5305,52 @@ mod tests {
             }
             _ => assert!(false, "Expected Incoming::UserHistoricalOrders"),
         }
+    }
+
+    /// Values mainnet `historicalOrders` reports that the SDK used to reject. One such order
+    /// anywhere in a user's history failed the whole response.
+    #[test]
+    fn test_historical_orders_with_rarer_values() {
+        let order = |order_type: &str, tif: &str, status: &str| {
+            let json = format!(
+                r#"{{
+                    "order":{{
+                        "coin":"XRP","side":"A","limitPx":"1.3716","sz":"0.0","oid":552268017772,
+                        "timestamp":1790038701396,"triggerCondition":"N/A","isTrigger":false,
+                        "triggerPx":"0.0","children":[],"isPositionTpsl":false,"reduceOnly":true,
+                        "orderType":"{order_type}","origSz":"100000.0","tif":"{tif}","cloid":null
+                    }},
+                    "status":"{status}",
+                    "statusTimestamp":1790038701396
+                }}"#
+            );
+            serde_json::from_str::<OrderUpdate<BasicOrder>>(&json).unwrap()
+        };
+
+        let trailing_stop = order("Trailing Stop Market", "Gtc", "filled");
+        assert!(matches!(
+            trailing_stop.order.order_type,
+            OrderType::TrailingStopMarket
+        ));
+
+        let liquidation = order("Market", "LiquidationMarket", "filled");
+        assert!(matches!(
+            liquidation.order.tif,
+            Some(TimeInForce::LiquidationMarket)
+        ));
+
+        let vault_close = order("Vault Close", "Ioc", "filled");
+        assert!(matches!(
+            vault_close.order.order_type,
+            OrderType::VaultClose
+        ));
+
+        let outcome_settled = order("Limit", "Gtc", "outcomeSettledCanceled");
+        assert!(matches!(
+            outcome_settled.status,
+            OrderStatus::OutcomeSettledCanceled
+        ));
+        assert!(outcome_settled.status.is_cancelled());
     }
 
     #[test]

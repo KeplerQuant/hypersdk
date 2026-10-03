@@ -139,6 +139,9 @@ pub enum Action {
         /// TWAP ID to cancel.
         t: u64,
     },
+    /// Place a native trailing stop.
+    #[from(skip)]
+    TrailingStop(TrailingStop),
     /// Withdraw to Arbitrum L1.
     #[from(skip)]
     Withdraw3(Withdraw3Action),
@@ -341,6 +344,7 @@ impl Action {
             | Action::AgentSetAbstraction { .. }
             | Action::TwapOrder { .. }
             | Action::TwapCancel { .. }
+            | Action::TrailingStop(_)
             | Action::CDeposit { .. }
             | Action::CWithdraw { .. }
             | Action::ReserveRequestWeight { .. }
@@ -495,6 +499,10 @@ pub enum OkResponse {
     /// reason in [`TwapCancelStatus::Error`].
     TwapCancel {
         status: TwapCancelStatus,
+    },
+    /// Reply to a trailing stop: the ID of the order it placed.
+    TrailingStop {
+        oid: u64,
     },
     /// Address of the sub-account just created. `data` is the bare address.
     CreateSubAccount(Address),
@@ -1330,6 +1338,70 @@ pub struct TwapOrderParams {
     pub t: bool,
 }
 
+/// A native trailing stop: a market order that triggers once the mark price retraces from
+/// its best level since activation by `retracement`. Perp markets only.
+///
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#place-a-trailing-stop-order>
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailingStop {
+    /// Asset index.
+    pub asset: usize,
+    /// `true` for buy, `false` for sell.
+    pub is_buy: bool,
+    /// Size.
+    #[serde(with = "crate::hypercore::utils::decimal_normalized")]
+    pub sz: Decimal,
+    /// Reduce only.
+    pub reduce_only: bool,
+    /// How far the price retraces before the stop triggers.
+    pub retracement: TrailingStopRetracement,
+    /// Price at which the stop starts trailing. `None` starts it immediately.
+    ///
+    /// Sent as `null` when unset rather than omitted: the exchange hashes the field either
+    /// way, so leaving it out changes the signature.
+    #[serde(with = "crate::hypercore::utils::decimal_normalized_option")]
+    pub activation_px: Option<Decimal>,
+}
+
+/// How far the price retraces before a [`TrailingStop`] triggers.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TrailingStopRetracement {
+    /// A percentage, e.g. `dec!(1.5)` for 1.5%. Sent as `"1.5%"`.
+    Pct(#[serde(with = "percent")] Decimal),
+    /// A price distance.
+    Px(#[serde(with = "crate::hypercore::utils::decimal_normalized")] Decimal),
+}
+
+/// A percentage as the exchange writes it, e.g. `"1.5%"`.
+mod percent {
+    use std::str::FromStr;
+
+    use rust_decimal::Decimal;
+    use serde::{Deserialize, Deserializer, Serializer, de};
+
+    pub fn serialize<S>(value: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}%", value.normalize()))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Decimal, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let digits = s
+            .strip_suffix('%')
+            .ok_or_else(|| de::Error::custom(format!("percentage without %: `{s}`")))?;
+        Decimal::from_str(digits)
+            .map(|d| d.normalize())
+            .map_err(de::Error::custom)
+    }
+}
+
 /// Withdraw to Arbitrum L1.
 ///
 /// Uses EIP-712 human-readable signing. $1 fee, ~5 minute finalization.
@@ -2031,6 +2103,72 @@ mod tests {
             Response::Ok(OkResponse::TwapCancel {
                 status: TwapCancelStatus::Error(_)
             })
+        ));
+    }
+
+    /// The documented shape, with the percentage suffixed and an unset `activationPx` sent
+    /// as `null`, which the exchange hashes.
+    #[test]
+    fn trailing_stop_serializes_as_documented() {
+        use rust_decimal::dec;
+
+        let pct = Action::TrailingStop(TrailingStop {
+            asset: 0,
+            is_buy: false,
+            sz: dec!(0.0010),
+            reduce_only: true,
+            retracement: TrailingStopRetracement::Pct(dec!(1.50)),
+            activation_px: None,
+        });
+        assert_eq!(
+            serde_json::to_value(&pct).unwrap(),
+            serde_json::json!({
+                "type": "trailingStop", "asset": 0, "isBuy": false, "sz": "0.001",
+                "reduceOnly": true, "retracement": {"pct": "1.5%"}, "activationPx": null
+            })
+        );
+
+        let px = Action::TrailingStop(TrailingStop {
+            asset: 3,
+            is_buy: true,
+            sz: dec!(2),
+            reduce_only: false,
+            retracement: TrailingStopRetracement::Px(dec!(500.0)),
+            activation_px: Some(dec!(120000.0)),
+        });
+        let json = serde_json::to_value(&px).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "trailingStop", "asset": 3, "isBuy": true, "sz": "2",
+                "reduceOnly": false, "retracement": {"px": "500"}, "activationPx": "120000"
+            })
+        );
+
+        let Action::TrailingStop(back) = serde_json::from_value(json).unwrap() else {
+            panic!("expected a trailing stop");
+        };
+        assert_eq!(back.retracement, TrailingStopRetracement::Px(dec!(500)));
+        assert_eq!(back.activation_px, Some(dec!(120000)));
+
+        let back: TrailingStopRetracement =
+            serde_json::from_value(serde_json::json!({"pct": "1.234%"})).unwrap();
+        assert_eq!(back, TrailingStopRetracement::Pct(dec!(1.234)));
+        assert!(
+            serde_json::from_value::<TrailingStopRetracement>(serde_json::json!({"pct": "1.2"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn trailing_stop_reply_deserializes() {
+        let reply: Response = serde_json::from_str(
+            r#"{"status":"ok","response":{"type":"trailingStop","data":{"oid":77738308}}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            reply,
+            Response::Ok(OkResponse::TrailingStop { oid: 77738308 })
         ));
     }
 
@@ -2909,6 +3047,30 @@ mod tests {
                     commission_bps: None,
                     signer: Some(other),
                 })),
+            ),
+            // Documented, but the hash depends on `activationPx` being sent as `null` when
+            // unset, which only the exchange can confirm.
+            (
+                "trailingStop",
+                Action::TrailingStop(TrailingStop {
+                    asset: 0,
+                    is_buy: false,
+                    sz: dec!(0.001),
+                    reduce_only: true,
+                    retracement: TrailingStopRetracement::Pct(dec!(1.5)),
+                    activation_px: None,
+                }),
+            ),
+            (
+                "trailingStop with activationPx",
+                Action::TrailingStop(TrailingStop {
+                    asset: 0,
+                    is_buy: false,
+                    sz: dec!(0.001),
+                    reduce_only: true,
+                    retracement: TrailingStopRetracement::Px(dec!(500)),
+                    activation_px: Some(dec!(120000)),
+                }),
             ),
         ];
 

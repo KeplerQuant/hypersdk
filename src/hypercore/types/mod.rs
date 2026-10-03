@@ -98,8 +98,8 @@ pub(super) mod solidity;
 pub use api::{
     AbstractionMode, Action, ActionRequest, ApproveBuilderFee, GossipPriorityBid,
     Hip3LiquidatorTransferAction, MultiSigAction, MultiSigPayload, OkResponse, Response,
-    TokenDelegateAction, TwapOrderParams, UsdClassTransferAction, UserDexAbstractionAction,
-    UserSetAbstractionAction, Withdraw3Action,
+    TokenDelegateAction, TrailingStop, TrailingStopRetracement, TwapOrderParams,
+    UsdClassTransferAction, UserDexAbstractionAction, UserSetAbstractionAction, Withdraw3Action,
 };
 use api::{AgentSendAssetAction, SendAssetAction, SpotSendAction, UsdSendAction};
 

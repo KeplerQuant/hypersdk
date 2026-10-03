@@ -87,6 +87,32 @@ pub(super) mod decimal_normalized {
     }
 }
 
+/// [`decimal_normalized`] for an optional decimal. `None` serializes as `null`.
+pub(super) mod decimal_normalized_option {
+    use rust_decimal::Decimal;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &Option<Decimal>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(value) => super::decimal_normalized::serialize(value, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Decimal>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Normalized(#[serde(with = "super::decimal_normalized")] Decimal);
+
+        Ok(Option::<Normalized>::deserialize(deserializer)?.map(|Normalized(d)| d))
+    }
+}
+
 /// Serde module for `OidOrCloid` that ensures the `Right(Cloid)` variant is always
 /// serialized as a hex string (consistent across both JSON and MessagePack formats).
 ///
